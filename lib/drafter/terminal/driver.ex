@@ -198,8 +198,10 @@ defmodule Drafter.Terminal.Driver do
   defp disable_flow_control do
     case :os.type() do
       {:unix, _} ->
-        result = Drafter.Terminal.TermiosNif.disable_flow_control()
-        if result != :ok, do: System.cmd("stty", ["-ixon"], stderr_to_stdout: true)
+        case Drafter.Terminal.TermiosNif.disable_flow_control() do
+          :nif_not_loaded -> System.cmd("stty", ["-ixon"], stderr_to_stdout: true)
+          _ -> :ok
+        end
         :ok
 
       _ ->
@@ -380,20 +382,32 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp detect_terminal_size() do
+    case :os.type() do
+      {:win32, _} -> detect_terminal_size_windows()
+      _ -> detect_terminal_size_unix()
+    end
+  end
+
+  defp detect_terminal_size_unix do
     case System.cmd("tput", ["cols"]) do
       {cols_str, 0} ->
         case System.cmd("tput", ["lines"]) do
           {lines_str, 0} ->
-            cols = String.trim(cols_str) |> String.to_integer()
-            lines = String.trim(lines_str) |> String.to_integer()
-            {cols, lines}
-
-          _ ->
-            {80, 24}
+            {String.trim(cols_str) |> String.to_integer(), String.trim(lines_str) |> String.to_integer()}
+          _ -> {80, 24}
         end
+      _ -> {80, 24}
+    end
+  end
 
-      _ ->
-        {80, 24}
+  defp detect_terminal_size_windows do
+    with {"" <> cols_str, 0} <- System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Width"]),
+         {"" <> lines_str, 0} <- System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Height"]),
+         {cols, ""} <- Integer.parse(String.trim(cols_str)),
+         {lines, ""} <- Integer.parse(String.trim(lines_str)) do
+      {cols, lines}
+    else
+      _ -> {80, 24}
     end
   end
 end
