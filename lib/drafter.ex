@@ -1,6 +1,6 @@
 defmodule Drafter do
   @moduledoc ~S"""
-  A pure Elixir Terminal User Interface framework.
+  An Elixir Terminal User Interface framework.
 
   Drafter provides a complete TUI framework with:
   - Widget-based UI components

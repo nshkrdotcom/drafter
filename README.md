@@ -1,6 +1,6 @@
 # Drafter
 
-A pure Elixir Terminal User Interface framework inspired by Python's Textual. Build rich, interactive terminal applications with a declarative API similar to Phoenix LiveView.
+An Elixir Terminal User Interface framework inspired by Python's Textual. Build rich, interactive terminal applications with a declarative API similar to Phoenix LiveView.
 
 ## Features
 

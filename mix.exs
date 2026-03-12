@@ -11,7 +11,7 @@ defmodule Drafter.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      description: "A pure Elixir Terminal User Interface framework",
+      description: "An Elixir Terminal User Interface framework",
       package: package(),
       consolidate_protocols: true,
       source_url: "https://github.com/jaman/drafter",
