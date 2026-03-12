@@ -21,6 +21,11 @@ erl_crash.dump
 
 # Ignore package tarball (built via "mix hex.build").
 tui_elixir-*.tar
+drafter-*.tar
+
+# Compiled NIF binaries (platform-specific, built at compile time)
+/priv/*.so
+/priv/*.dll
 
 # Ignore beam files at root level (from elixir/iex direct compilation)
 *.beam
