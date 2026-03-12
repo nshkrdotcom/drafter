@@ -198,11 +198,9 @@ defmodule Drafter.Terminal.Driver do
   defp disable_flow_control do
     case :os.type() do
       {:unix, _} ->
-        case Drafter.Terminal.TermiosNif.disable_flow_control() do
-          :ok -> :ok
-          :nif_not_loaded -> System.cmd("stty", ["-ixon"], stderr_to_stdout: true); :ok
-          _ -> :ok
-        end
+        result = Drafter.Terminal.TermiosNif.disable_flow_control()
+        if result != :ok, do: System.cmd("stty", ["-ixon"], stderr_to_stdout: true)
+        :ok
 
       _ ->
         :ok
