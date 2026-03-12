@@ -14,8 +14,8 @@ defmodule Drafter.MixProject do
       description: "A pure Elixir Terminal User Interface framework",
       package: package(),
       consolidate_protocols: true,
-      source_url: "https://github.com/tbd/drafter",
-      homepage_url: "https://github.com/tbd/drafter",
+      source_url: "https://github.com/jaman/drafter",
+      homepage_url: "https://github.com/jaman/drafter",
       docs: [
         main: "Drafter",
         extras: ["README.md"],
@@ -56,7 +56,7 @@ defmodule Drafter.MixProject do
     [
       maintainers: ["Drafter"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/example/drafter"}
+      links: %{"GitHub" => "https://github.com/jaman/drafter"}
     ]
   end
 

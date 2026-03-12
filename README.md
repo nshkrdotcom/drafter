@@ -376,6 +376,29 @@ When `path:` is given, tree-sitter reads the file directly (one system call, no 
 
 ## Running Examples
 
+Standalone scripts in the `examples/` directory can be run directly with `elixir`:
+
+```bash
+elixir examples/hello_world.exs
+elixir examples/counter.exs
+elixir examples/animation.exs
+elixir examples/clock.exs
+elixir examples/calculator.exs
+elixir examples/charts.exs
+elixir examples/widgets.exs
+elixir examples/theme_sandbox.exs
+elixir examples/themes.exs
+elixir examples/hsl_colors.exs
+elixir examples/data_table.exs
+elixir examples/screens.exs
+elixir examples/key_inspector.exs
+elixir examples/code_browser.exs
+elixir examples/syntax_highlight.exs
+elixir examples/custom_loop.exs
+```
+
+Examples that are compiled into the library can be run via `mix run`:
+
 ```bash
 mix run -e "Drafter.run(Drafter.Examples.ScreenDemo)"
 mix run -e "Drafter.run(Drafter.Examples.DeclarativeSandbox)"
