@@ -1,0 +1,397 @@
+# Drafter
+
+A pure Elixir Terminal User Interface framework inspired by Python's Textual. Build rich, interactive terminal applications with a declarative API similar to Phoenix LiveView.
+
+## Features
+
+- **Declarative API** - Phoenix LiveView-inspired component model
+- **Rich Widget Library** - 30+ widgets including DataTable, Tree, Charts, Inputs
+- **Event-Driven Architecture** - Keyboard, mouse, and custom events
+- **Flexible Layout System** - Vertical, horizontal, grid, and scrollable layouts
+- **Multi-Screen Navigation** - Push/pop screens, modals, toasts, panels
+- **Theming System** - Built-in themes with customization support
+- **Animation Support** - Smooth property animations with easing functions
+- **Zero Runtime Dependencies** - Pure Elixir implementation
+
+## Installation
+
+Add `drafter` to your `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:drafter, path: "../drafter"}
+  ]
+end
+```
+
+## Quick Start
+
+```elixir
+defmodule MyApp do
+  use Drafter.App
+
+  def mount(_props) do
+    %{counter: 0}
+  end
+
+  def render(state) do
+    vertical([
+      header("My App"),
+      label("Counter: #{state.counter}"),
+      horizontal([
+        button("Decrement", on_click: :decrement),
+        button("Increment", on_click: :increment)
+      ], gap: 2),
+      footer(bindings: [{"q", "Quit"}])
+    ])
+  end
+
+  def handle_event(:increment, _data, state) do
+    {:ok, %{state | counter: state.counter + 1}}
+  end
+
+  def handle_event(:decrement, _data, state) do
+    {:ok, %{state | counter: state.counter - 1}}
+  end
+
+  def handle_event({:key, :q}, _state), do: {:stop, :normal}
+  def handle_event({:key, :c, [:ctrl]}, _state), do: {:stop, :normal}
+  def handle_event(_event, state), do: {:noreply, state}
+end
+```
+
+Run your app:
+
+```bash
+mix run -e "Drafter.run(MyApp)"
+```
+
+## Core Concepts
+
+### Application Structure
+
+Every TUI application implements the `Drafter.App` behaviour:
+
+```elixir
+defmodule MyApp do
+  use Drafter.App
+
+  @callback mount(props :: map()) :: state :: map()
+  @callback render(state :: map()) :: component_tree :: tuple()
+  @callback handle_event(event :: term(), state :: map()) :: result :: term()
+  @callback on_ready(state :: map()) :: state :: map()
+  @callback on_timer(timer_id :: atom(), state :: map()) :: state :: map()
+end
+```
+
+### Widget Types
+
+#### Display Widgets
+- `label(text, opts)` - Text display
+- `markdown(content, opts)` - Markdown rendering
+- `digits(value, opts)` - Large ASCII art numbers
+- `sparkline(data, opts)` - Mini inline charts
+- `chart(data, opts)` - Full charts (line, bar, pie)
+- `progress_bar(opts)` - Progress indication
+- `loading_indicator(opts)` - Animated spinner
+- `rule(opts)` - Horizontal/vertical dividers
+
+#### Input Widgets
+- `button(text, opts)` - Clickable button
+- `text_input(opts)` - Single-line text input
+- `text_area(opts)` - Multi-line text editor
+- `checkbox(label, opts)` - Boolean toggle
+- `switch(opts)` - On/off switch
+- `radio_set(options, opts)` - Mutually exclusive options
+- `selection_list(options, opts)` - Multi-select list
+- `option_list(items, opts)` - Single-select list
+- `masked_input(opts)` - Formatted input (phone, date, etc.)
+
+#### Data Widgets
+- `data_table(opts)` - Full-featured table with sorting, selection
+- `tree(opts)` - Hierarchical data display
+- `directory_tree(opts)` - File system browser
+
+#### Layout Widgets
+- `vertical(children, opts)` - Vertical stack
+- `horizontal(children, opts)` - Horizontal row
+- `container(children, opts)` - Generic container
+- `scrollable(children, opts)` - Scrollable area
+- `grid(children, opts)` - CSS Grid-like layout
+- `sidebar(left, right, opts)` - Two-column layout
+
+#### Container Widgets
+- `card(children, opts)` - Bordered card
+- `box(children, opts)` - Simple box
+- `collapsible(title, content, opts)` - Expandable section
+- `tabbed_content(tabs, opts)` - Tab navigation
+- `header(title, opts)` - App header
+- `footer(opts)` - App footer with keybindings
+
+### Event Handling
+
+Events are handled in the `handle_event/2` callback:
+
+```elixir
+def handle_event(:button_clicked, _data, state) do
+  {:ok, %{state | clicked: true}}
+end
+
+def handle_event({:key, :enter}, state) do
+  {:ok, state}
+end
+
+def handle_event({:key, :q}, _state) do
+  {:stop, :normal}
+end
+
+def handle_event({:key, :c, [:ctrl]}, _state) do
+  {:stop, :normal}
+end
+```
+
+#### Event Return Values
+
+- `{:ok, new_state}` - Update state and re-render
+- `{:noreply, state}` - No re-render needed
+- `{:stop, reason}` - Exit the application
+- `{:show_modal, module, props, opts}` - Display a modal
+- `{:show_toast, message, opts}` - Show a toast notification
+- `{:push, module, props, opts}` - Push a new screen
+- `{:pop, result}` - Pop current screen
+
+### Screens and Navigation
+
+Create multi-screen applications with modals and toasts:
+
+```elixir
+defmodule MainScreen do
+  use Drafter.Screen
+
+  def mount(_props), do: %{items: []}
+
+  def render(state) do
+    vertical([
+      label("Main Screen"),
+      button("Open Modal", on_click: :open_modal),
+      button("Show Toast", on_click: :show_toast)
+    ])
+  end
+
+  def handle_event(:open_modal, _state) do
+    {:show_modal, MyModal, %{title: "Info"}, [width: 50, height: 15]}
+  end
+
+  def handle_event(:show_toast, _state) do
+    {:show_toast, "Hello!", [variant: :success]}
+  end
+end
+
+defmodule MyModal do
+  use Drafter.Screen
+
+  def mount(props), do: %{title: props.title}
+
+  def render(state) do
+    vertical([
+      label(state.title),
+      button("Close", on_click: :close)
+    ])
+  end
+
+  def handle_event(:close, _state), do: {:pop, :closed}
+  def handle_event({:key, :escape}, _state), do: {:pop, :dismissed}
+end
+```
+
+### Screen Types
+
+- **Default** - Full-screen content
+- **Modal** - Centered dialog with overlay
+- **Popover** - Anchored popup
+- **Panel** - Side panel
+- **Toast** - Auto-dismissing notification
+
+### Toast Variants
+
+```elixir
+{:show_toast, "Info message", [variant: :info]}
+{:show_toast, "Success!", [variant: :success]}
+{:show_toast, "Warning!", [variant: :warning]}
+{:show_toast, "Error!", [variant: :error]}
+```
+
+Toast positions: `:top_left`, `:top_center`, `:top_right`, `:middle_left`, `:middle_center`, `:middle_right`, `:bottom_left`, `:bottom_center`, `:bottom_right`
+
+### Widget State Binding
+
+Bind widget values directly to app state:
+
+```elixir
+def mount(_props) do
+  %{username: "", remember: false}
+end
+
+def render(state) do
+  vertical([
+    text_input(placeholder: "Username", bind: :username),
+    checkbox("Remember me", bind: :remember),
+    button("Submit", on_click: :submit)
+  ])
+end
+
+def handle_event(:submit, _data, state) do
+  IO.puts("Username: #{state.username}")
+  {:ok, state}
+end
+```
+
+### Accessing Widget State
+
+```elixir
+Drafter.get_widget_value(:my_input)
+Drafter.get_widget_state(:my_checkbox)
+Drafter.query_one("#submit")
+Drafter.query_all("Button")
+```
+
+### Timers
+
+```elixir
+def on_ready(state) do
+  Drafter.set_interval(1000, :tick)
+  state
+end
+
+def on_timer(:tick, state) do
+  %{state | seconds: state.seconds + 1}
+end
+```
+
+### Animations
+
+```elixir
+Drafter.animate(:my_widget, :opacity, 0.5, duration: 500, easing: :ease_out)
+Drafter.animate(:my_label, :background, {255, 0, 0}, duration: 1000)
+```
+
+Available easing functions: `:linear`, `:ease`, `:ease_in`, `:ease_out`, `:ease_in_out`, `:ease_in_quad`, `:ease_out_quad`, `:ease_in_cubic`, `:ease_out_cubic`, `:ease_in_elastic`, `:ease_out_elastic`, `:ease_in_bounce`, `:ease_out_bounce`
+
+## Complete Example
+
+```elixir
+defmodule TodoApp do
+  use Drafter.App
+
+  def mount(_props) do
+    %{
+      todos: ["Learn Drafter", "Build awesome CLI apps"],
+      new_todo: ""
+    }
+  end
+
+  def render(state) do
+    todo_items = Enum.map(state.todos, fn todo ->
+      label("  • #{todo}")
+    end)
+
+    vertical([
+      header("Todo App"),
+      scrollable(todo_items, flex: 1),
+      horizontal([
+        text_input(placeholder: "Add todo...", bind: :new_todo, flex: 1),
+        button("Add", on_click: :add_todo)
+      ], gap: 1),
+      footer(bindings: [{"q", "Quit"}, {"Enter", "Add"}])
+    ])
+  end
+
+  def handle_event(:add_todo, _data, state) do
+    if String.trim(state.new_todo) != "" do
+      {:ok, %{state | todos: state.todos ++ [state.new_todo], new_todo: ""}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_event({:key, :q}, _state), do: {:stop, :normal}
+  def handle_event(_event, state), do: {:noreply, state}
+end
+```
+
+## Syntax Highlighting
+
+Drafter supports syntax highlighting via the [`tree-sitter`](https://tree-sitter.github.io/tree-sitter/) CLI. This is entirely optional — if you don't need it, no setup is required.
+
+### If you already have tree-sitter installed
+
+Nothing to do. Pass `syntax_highlighting: true` when starting your app:
+
+```elixir
+Drafter.run(MyApp, syntax_highlighting: true)
+```
+
+Then use `code_view` with a file path:
+
+```elixir
+code_view(path: "/path/to/file.rs", show_line_numbers: true, flex: 1)
+```
+
+Language is detected automatically from the file extension. Highlighting quality depends on which grammars you have installed in your tree-sitter environment.
+
+### If you don't have tree-sitter
+
+Skip `syntax_highlighting: true` (or don't pass it). The `code_view` widget will still work — Elixir files get built-in highlighting, all other files render as plain text.
+
+### Installing tree-sitter
+
+```bash
+# macOS
+brew install tree-sitter
+
+# Or via npm
+npm install -g tree-sitter-cli
+```
+
+After installing, set up grammars for the languages you want to highlight by following the [tree-sitter getting started guide](https://tree-sitter.github.io/tree-sitter/). The more grammars you have installed, the more languages `code_view` will highlight.
+
+### Supported in code_view
+
+```elixir
+code_view(
+  path: state.selected_file,   # preferred — tree-sitter reads the file directly
+  show_line_numbers: true,
+  flex: 1
+)
+
+code_view(
+  source: some_string,         # also works — uses a temp file under the hood
+  language: :python,
+  flex: 1
+)
+```
+
+When `path:` is given, tree-sitter reads the file directly (one system call, no temp file). When only `source:` is given, a temp file is created, highlighted, then deleted.
+
+## Running Examples
+
+```bash
+mix run -e "Drafter.run(Drafter.Examples.ScreenDemo)"
+mix run -e "Drafter.run(Drafter.Examples.DeclarativeSandbox)"
+mix run -e "Drafter.run(Drafter.Examples.ThemeSandbox)"
+mix run -e "Drafter.run(Drafter.Examples.ChartDemo)"
+```
+
+## Keyboard Shortcuts
+
+- `Ctrl+C` or `Ctrl+Q` - Quit application
+- `Tab` - Next focusable widget
+- `Shift+Tab` - Previous focusable widget
+- Arrow keys - Navigate within widgets
+- `Enter` - Activate/confirm
+- `Escape` - Dismiss modals
+
+## License
+
+MIT

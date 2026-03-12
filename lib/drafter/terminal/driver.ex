@@ -1,0 +1,397 @@
+defmodule Drafter.Terminal.Driver do
+  @moduledoc false
+
+  use GenServer
+
+  alias Drafter.Terminal.ANSI
+
+  defstruct [
+    :shell_pid,
+    buffer: "",
+    mouse_enabled: false,
+    alt_screen: false,
+    raw_mode: false,
+    size: {80, 24}
+  ]
+
+  @type state :: %__MODULE__{
+          shell_pid: pid() | nil,
+          buffer: binary(),
+          mouse_enabled: boolean(),
+          alt_screen: boolean(),
+          raw_mode: boolean(),
+          size: {pos_integer(), pos_integer()}
+        }
+
+  @doc "Start the terminal driver"
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @doc "Setup terminal for TUI mode"
+  @spec setup() :: :ok | {:error, term()}
+  def setup() do
+    GenServer.call(__MODULE__, :setup)
+  end
+
+  @doc "Cleanup and restore terminal"
+  @spec cleanup() :: :ok
+  def cleanup() do
+    GenServer.call(__MODULE__, :cleanup)
+  end
+
+  @doc "Write output to terminal"
+  @spec write(iodata()) :: :ok
+  def write(data) do
+    GenServer.cast(__MODULE__, {:write, data})
+  end
+
+  @doc "Get current terminal size"
+  @spec get_size() :: {pos_integer(), pos_integer()}
+  def get_size() do
+    GenServer.call(__MODULE__, :get_size)
+  end
+
+  @doc "Enable mouse events"
+  @spec enable_mouse() :: :ok
+  def enable_mouse() do
+    GenServer.cast(__MODULE__, :enable_mouse)
+  end
+
+  @doc "Disable mouse events"
+  @spec disable_mouse() :: :ok
+  def disable_mouse() do
+    GenServer.cast(__MODULE__, :disable_mouse)
+  end
+
+  @impl GenServer
+  def init(opts) do
+    event_manager = Keyword.get(opts, :event_manager, Drafter.Event.Manager)
+
+    state = %__MODULE__{
+      shell_pid: nil,
+      buffer: "",
+      mouse_enabled: false,
+      alt_screen: false,
+      raw_mode: false,
+      size: detect_terminal_size()
+    }
+
+    Process.put(:event_manager, event_manager)
+
+    {:ok, state}
+  end
+
+  @impl GenServer
+  def handle_call(:setup, _from, state) do
+    case setup_terminal(state) do
+      {:ok, new_state} ->
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:cleanup, _from, state) do
+    new_state = cleanup_terminal(state)
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call(:get_size, _from, state) do
+    {:reply, state.size, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:write, data}, state) do
+    if state.raw_mode do
+      IO.write(data)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_cast(:enable_mouse, state) do
+    if state.raw_mode and not state.mouse_enabled do
+      IO.write(ANSI.enable_mouse())
+      {:noreply, %{state | mouse_enabled: true}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_cast(:disable_mouse, state) do
+    if state.raw_mode and state.mouse_enabled do
+      IO.write(ANSI.disable_mouse())
+      {:noreply, %{state | mouse_enabled: false}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_info({:stdin, data}, state) do
+    new_buffer = state.buffer <> data
+    {events, remaining_buffer} = ANSI.parse_sequence(new_buffer)
+
+    event_manager = Process.get(:event_manager)
+
+    Enum.each(events, fn event ->
+      GenServer.cast(event_manager, {:event, event})
+    end)
+
+    {:noreply, %{state | buffer: remaining_buffer}}
+  end
+
+  def handle_info({:signal, :winch}, state) do
+    new_size = detect_terminal_size()
+    event_manager = Process.get(:event_manager)
+    GenServer.cast(event_manager, {:event, {:resize, new_size}})
+
+    {:noreply, %{state | size: new_size}}
+  end
+
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def terminate(_reason, state) do
+    cleanup_terminal(state)
+    :ok
+  end
+
+  defp setup_terminal(state) do
+    try do
+      shell_pid = :shell.start_interactive({:noshell, :raw})
+
+      disable_flow_control()
+
+      setup_stdin()
+      setup_signal_handling()
+      setup_exit_handler()
+
+      IO.write([
+        ANSI.enter_alt_screen(),
+        ANSI.hide_cursor(),
+        ANSI.clear_screen(),
+        ANSI.enable_mouse()
+      ])
+
+      new_state = %{
+        state
+        | shell_pid: shell_pid,
+          raw_mode: true,
+          alt_screen: true,
+          mouse_enabled: true,
+          size: detect_terminal_size()
+      }
+
+      {:ok, new_state}
+    rescue
+      error ->
+        {:error, error}
+    end
+  end
+
+  defp disable_flow_control do
+    case :os.type() do
+      {:unix, _} ->
+        Drafter.Terminal.TermiosNif.disable_flow_control()
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp setup_exit_handler do
+    Process.flag(:trap_exit, true)
+  end
+
+  defp cleanup_terminal(state) do
+    if state.raw_mode do
+      cleanup_sequences = []
+
+      cleanup_sequences =
+        if state.mouse_enabled do
+          cleanup_sequences ++ [ANSI.disable_mouse()]
+        else
+          cleanup_sequences
+        end
+
+      cleanup_sequences =
+        if state.alt_screen do
+          cleanup_sequences ++ [ANSI.show_cursor(), ANSI.exit_alt_screen()]
+        else
+          cleanup_sequences
+        end
+
+      if length(cleanup_sequences) > 0 do
+        IO.write(cleanup_sequences)
+        Process.sleep(50)
+      end
+
+      if state.shell_pid do
+        try do
+          Process.exit(state.shell_pid, :normal)
+        rescue
+          _ -> :ok
+        end
+      end
+    end
+
+    %{state | raw_mode: false, alt_screen: false, mouse_enabled: false, shell_pid: nil}
+  end
+
+  defp setup_stdin() do
+    :io.setopts(:stdio, [:binary, {:encoding, :unicode}])
+
+    spawn_link(fn -> stdin_reader() end)
+  end
+
+  defp stdin_reader() do
+    case IO.binread(:stdio, 1) do
+      :eof ->
+        :ok
+
+      {:error, _reason} ->
+        :ok
+
+      "\e" ->
+        read_escape_sequence("\e")
+
+      data when is_binary(data) ->
+        send(__MODULE__, {:stdin, data})
+        stdin_reader()
+    end
+  end
+
+  defp read_escape_sequence(buffer) do
+    reader_pid = self()
+    timer_ref = Process.send_after(reader_pid, :escape_timeout, 100)
+
+    receive do
+      :escape_timeout ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+    after
+      0 ->
+        case IO.binread(:stdio, 1) do
+          :eof ->
+            Process.cancel_timer(timer_ref)
+            send(__MODULE__, {:stdin, buffer})
+            :ok
+
+          {:error, _} ->
+            Process.cancel_timer(timer_ref)
+            send(__MODULE__, {:stdin, buffer})
+            stdin_reader()
+
+          "[" ->
+            Process.cancel_timer(timer_ref)
+            read_csi_sequence(buffer <> "[")
+
+          char when is_binary(char) ->
+            Process.cancel_timer(timer_ref)
+            complete_sequence = buffer <> char
+            send(__MODULE__, {:stdin, complete_sequence})
+            stdin_reader()
+        end
+    end
+  end
+
+  defp read_csi_sequence(buffer) do
+    case IO.binread(:stdio, 1) do
+      :eof ->
+        send(__MODULE__, {:stdin, buffer})
+        :ok
+
+      {:error, _} ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      char when is_binary(char) ->
+        new_buffer = buffer <> char
+
+        cond do
+          String.match?(char, ~r/[a-zA-Z~]/) ->
+            send(__MODULE__, {:stdin, new_buffer})
+            stdin_reader()
+
+          char == "<" ->
+            read_sgr_mouse_sequence(new_buffer)
+
+          true ->
+            read_csi_sequence(new_buffer)
+        end
+    end
+  end
+
+  defp read_sgr_mouse_sequence(buffer) do
+    case IO.binread(:stdio, 1) do
+      :eof ->
+        send(__MODULE__, {:stdin, buffer})
+        :ok
+
+      {:error, _} ->
+        send(__MODULE__, {:stdin, buffer})
+        stdin_reader()
+
+      char when is_binary(char) ->
+        new_buffer = buffer <> char
+
+        if char == "M" or char == "m" do
+          send(__MODULE__, {:stdin, new_buffer})
+          stdin_reader()
+        else
+          read_sgr_mouse_sequence(new_buffer)
+        end
+    end
+  end
+
+  defp setup_signal_handling() do
+    case :os.type() do
+      {:unix, _} ->
+        spawn_link(fn -> poll_terminal_size() end)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp poll_terminal_size() do
+    initial_size = detect_terminal_size()
+    poll_size_loop(initial_size)
+  end
+
+  defp poll_size_loop(last_size) do
+    :timer.sleep(500)
+    current_size = detect_terminal_size()
+
+    if current_size != last_size do
+      send(__MODULE__, {:signal, :winch})
+      poll_size_loop(current_size)
+    else
+      poll_size_loop(last_size)
+    end
+  end
+
+  defp detect_terminal_size() do
+    case System.cmd("tput", ["cols"]) do
+      {cols_str, 0} ->
+        case System.cmd("tput", ["lines"]) do
+          {lines_str, 0} ->
+            cols = String.trim(cols_str) |> String.to_integer()
+            lines = String.trim(lines_str) |> String.to_integer()
+            {cols, lines}
+
+          _ ->
+            {80, 24}
+        end
+
+      _ ->
+        {80, 24}
+    end
+  end
+end

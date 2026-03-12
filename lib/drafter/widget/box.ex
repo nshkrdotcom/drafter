@@ -1,0 +1,217 @@
+defmodule Drafter.Widget.Box do
+  @behaviour Drafter.Widget
+
+  alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Style.Computed
+
+  @border_chars %{
+    none: %{tl: " ", tr: " ", bl: " ", br: " ", h: " ", v: " "},
+    single: %{tl: "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│"},
+    double: %{tl: "╔", tr: "╗", bl: "╚", br: "╝", h: "═", v: "║"},
+    rounded: %{tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│"},
+    heavy: %{tl: "┏", tr: "┓", bl: "┗", br: "┛", h: "━", v: "┃"},
+    dashed: %{tl: "┌", tr: "┐", bl: "└", br: "┘", h: "┄", v: "┆"},
+    ascii: %{tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|"}
+  }
+
+  defstruct [
+    :title,
+    :border,
+    :padding,
+    :style,
+    :border_style,
+    :title_style,
+    :content_style,
+    :classes,
+    :app_module
+  ]
+
+  def mount(props) do
+    %__MODULE__{
+      title: Map.get(props, :title),
+      border: Map.get(props, :border, :rounded),
+      padding: Map.get(props, :padding, 0),
+      style: Map.get(props, :style, %{}),
+      border_style: Map.get(props, :border_style, %{}),
+      title_style: Map.get(props, :title_style, %{}),
+      content_style: Map.get(props, :content_style, %{}),
+      classes: Map.get(props, :classes, []),
+      app_module: Map.get(props, :app_module)
+    }
+  end
+
+  def render(state, rect) do
+    state = if is_struct(state, __MODULE__), do: state, else: mount(state)
+
+    computed = Computed.for_widget(:box, state, classes: state.classes, style: state.style)
+    bg = computed[:background] || {40, 44, 52}
+    fg = computed[:color] || {200, 200, 200}
+    border_fg = computed[:border_color] || {100, 100, 120}
+
+    base_style = %{fg: fg, bg: bg}
+    border_style_map = %{fg: border_fg, bg: bg}
+    title_style_map = Map.merge(%{fg: {150, 200, 255}, bg: bg, bold: true}, state.title_style)
+
+    chars = Map.get(@border_chars, state.border, @border_chars[:rounded])
+    has_border = state.border != :none
+    border_offset = if has_border, do: 1, else: 0
+    padding = state.padding
+
+    _content_width = max(0, rect.width - border_offset * 2 - padding * 2)
+    content_height = max(0, rect.height - border_offset * 2 - padding * 2)
+
+    strips = []
+
+    strips =
+      if has_border do
+        top_border =
+          render_top_border(chars, rect.width, state.title, border_style_map, title_style_map)
+
+        strips ++ [top_border]
+      else
+        strips
+      end
+
+    strips =
+      if padding > 0 do
+        padding_strips =
+          render_padding_rows(
+            chars,
+            rect.width,
+            padding,
+            has_border,
+            base_style,
+            border_style_map
+          )
+
+        strips ++ padding_strips
+      else
+        strips
+      end
+
+    content_strips =
+      render_content_rows(
+        chars,
+        rect.width,
+        content_height,
+        padding,
+        has_border,
+        base_style,
+        border_style_map
+      )
+
+    strips = strips ++ content_strips
+
+    strips =
+      if padding > 0 do
+        padding_strips =
+          render_padding_rows(
+            chars,
+            rect.width,
+            padding,
+            has_border,
+            base_style,
+            border_style_map
+          )
+
+        strips ++ padding_strips
+      else
+        strips
+      end
+
+    strips =
+      if has_border do
+        bottom_border = render_bottom_border(chars, rect.width, border_style_map)
+        strips ++ [bottom_border]
+      else
+        strips
+      end
+
+    strips
+  end
+
+  def update(props, state) do
+    Map.merge(state, props)
+  end
+
+  def handle_event(_event, state) do
+    {:noreply, state}
+  end
+
+  defp render_top_border(chars, width, title, border_style, title_style) do
+    inner_width = width - 2
+
+    if title && String.length(title) > 0 do
+      title_text = " #{title} "
+      title_len = String.length(title_text)
+      left_len = 2
+      right_len = max(0, inner_width - left_len - title_len)
+
+      segments = [
+        Segment.new(chars.tl, border_style),
+        Segment.new(String.duplicate(chars.h, left_len), border_style),
+        Segment.new(title_text, title_style),
+        Segment.new(String.duplicate(chars.h, right_len), border_style),
+        Segment.new(chars.tr, border_style)
+      ]
+
+      Strip.new(segments)
+    else
+      segments = [
+        Segment.new(chars.tl, border_style),
+        Segment.new(String.duplicate(chars.h, inner_width), border_style),
+        Segment.new(chars.tr, border_style)
+      ]
+
+      Strip.new(segments)
+    end
+  end
+
+  defp render_bottom_border(chars, width, border_style) do
+    inner_width = width - 2
+
+    segments = [
+      Segment.new(chars.bl, border_style),
+      Segment.new(String.duplicate(chars.h, inner_width), border_style),
+      Segment.new(chars.br, border_style)
+    ]
+
+    Strip.new(segments)
+  end
+
+  defp render_padding_rows(chars, width, padding, has_border, base_style, border_style) do
+    inner_width = if has_border, do: width - 2, else: width
+
+    Enum.map(1..padding, fn _ ->
+      if has_border do
+        segments = [
+          Segment.new(chars.v, border_style),
+          Segment.new(String.duplicate(" ", inner_width), base_style),
+          Segment.new(chars.v, border_style)
+        ]
+
+        Strip.new(segments)
+      else
+        Strip.new([Segment.new(String.duplicate(" ", width), base_style)])
+      end
+    end)
+  end
+
+  defp render_content_rows(chars, width, height, _padding, has_border, base_style, border_style) do
+    inner_width = if has_border, do: width - 2, else: width
+
+    Enum.map(1..max(1, height), fn _ ->
+      if has_border do
+        segments = [
+          Segment.new(chars.v, border_style),
+          Segment.new(String.duplicate(" ", inner_width), base_style),
+          Segment.new(chars.v, border_style)
+        ]
+
+        Strip.new(segments)
+      else
+        Strip.new([Segment.new(String.duplicate(" ", width), base_style)])
+      end
+    end)
+  end
+end

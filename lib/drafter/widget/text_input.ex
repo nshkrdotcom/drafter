@@ -1,0 +1,943 @@
+defmodule Drafter.Widget.TextInput do
+  @moduledoc """
+  A single-line text input widget with cursor navigation, text selection, and clipboard support.
+
+  Renders inside a bordered box and shows a blinking-style cursor block when focused.
+  Placeholder text is displayed when the field is empty and unfocused. Validation errors
+  appear below the input border in red when the field has been touched (blurred at least once).
+
+  ## Options
+
+    * `:text` - initial text value (default: `""`)
+    * `:placeholder` - hint text shown when empty and unfocused (default: `""`)
+    * `:bind` - app state key atom for two-way binding; the app state key is kept in sync
+    * `:id` - atom identifier for programmatic access via `Drafter.get_widget_value/1`
+    * `:on_change` - `(String.t() -> term())` called on every keystroke
+    * `:on_submit` - `(String.t() -> term())` called when Enter is pressed
+    * `:max_length` - maximum number of characters allowed
+    * `:validators` - list of `Drafter.Validation` validators run on blur
+    * `:disabled` - when `true`, the field is non-interactive (default: `false`)
+    * `:readonly` - when `true`, focus is accepted but text cannot be edited (default: `false`)
+    * `:style` - map of style overrides
+    * `:classes` - list of theme class atoms
+
+  ## Key bindings
+
+    * Arrow keys — move cursor one character left/right
+    * `Ctrl+←` / `Ctrl+→` — jump by word
+    * `Shift+←` / `Shift+→` / `Shift+Home` / `Shift+End` — extend selection
+    * `Ctrl+A` — select all
+    * `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — copy, cut, paste
+    * `Backspace` / `Delete` — delete character or selection
+    * `Enter` — trigger `:on_submit`
+    * `Home` / `End` — move cursor to start/end of text
+
+  ## Usage
+
+      text_input(placeholder: "Email address", on_submit: :login, validators: [:required, :email])
+  """
+
+  use Drafter.Widget,
+    handles: [:keyboard, :char, :click, :drag],
+    focusable: true
+
+  alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Style.Computed
+
+  defstruct [
+    :text,
+    :placeholder,
+    :cursor_position,
+    :scroll_offset,
+    :focused,
+    :style,
+    :classes,
+    :on_change,
+    :on_submit,
+    :max_length,
+    :width,
+    :selection_start,
+    :selection_end,
+    :app_module,
+    :validators,
+    :error,
+    :touched,
+    :disabled,
+    :readonly
+  ]
+
+  @type t :: %__MODULE__{
+          text: String.t(),
+          placeholder: String.t(),
+          cursor_position: non_neg_integer(),
+          scroll_offset: non_neg_integer(),
+          focused: boolean(),
+          style: map(),
+          classes: [atom()],
+          on_change: (String.t() -> term()) | nil,
+          on_submit: (String.t() -> term()) | nil,
+          max_length: pos_integer() | nil,
+          width: pos_integer(),
+          selection_start: non_neg_integer() | nil,
+          selection_end: non_neg_integer() | nil,
+          app_module: module() | nil,
+          validators: [Drafter.Validation.validator()] | nil,
+          error: String.t() | nil,
+          touched: boolean(),
+          disabled: boolean(),
+          readonly: boolean()
+        }
+
+  @impl Drafter.Widget
+  def mount(props) do
+    %__MODULE__{
+      text: Map.get(props, :text, ""),
+      placeholder: Map.get(props, :placeholder, ""),
+      cursor_position: Map.get(props, :cursor_position, 0),
+      scroll_offset: Map.get(props, :scroll_offset, 0),
+      focused: Map.get(props, :focused, false),
+      style: Map.get(props, :style, %{}),
+      classes: Map.get(props, :classes, []),
+      on_change: Map.get(props, :on_change),
+      on_submit: Map.get(props, :on_submit),
+      max_length: Map.get(props, :max_length),
+      width: Map.get(props, :width, 40),
+      selection_start: Map.get(props, :selection_start),
+      selection_end: Map.get(props, :selection_end),
+      app_module: Map.get(props, :app_module),
+      validators: Map.get(props, :validators),
+      error: Map.get(props, :error),
+      touched: Map.get(props, :touched, false),
+      disabled: Map.get(props, :disabled, false),
+      readonly: Map.get(props, :readonly, false)
+    }
+  end
+
+  @impl Drafter.Widget
+  def render(state, rect) do
+    normalized_state =
+      if is_struct(state, __MODULE__) do
+        state
+      else
+        mount(state)
+      end
+
+    width = Map.get(normalized_state, :width, 40)
+    content_width = min(width, rect.width - 2)
+    display_text = get_display_text(normalized_state, content_width)
+
+    top_border = "┌" <> String.duplicate("─", content_width) <> "┐"
+    bottom_border = "└" <> String.duplicate("─", content_width) <> "┘"
+
+    focused = Map.get(normalized_state, :focused, false)
+    classes = Map.get(normalized_state, :classes, [])
+    app_module = Map.get(normalized_state, :app_module)
+    error = Map.get(normalized_state, :error)
+    disabled = Map.get(normalized_state, :disabled, false)
+
+    state_classes = if disabled, do: [:disabled | classes], else: classes
+    state_classes = if error, do: [:error | state_classes], else: state_classes
+
+    computed_opts = [style: normalized_state.style, classes: state_classes]
+
+    computed_opts =
+      if app_module, do: Keyword.put(computed_opts, :app_module, app_module), else: computed_opts
+
+    computed = Computed.for_widget(:text_input, normalized_state, computed_opts)
+    border_computed = Computed.for_part(:text_input, normalized_state, :border, computed_opts)
+
+    content_style = Computed.to_segment_style(computed)
+    border_style = Computed.to_segment_style(border_computed)
+    bg_style = %{fg: content_style[:fg], bg: border_style[:bg]}
+    selection_style = Map.merge(content_style, %{reverse: true})
+
+    content_segments =
+      if has_selection?(normalized_state) do
+        render_with_selection(
+          normalized_state,
+          display_text,
+          content_width,
+          content_style,
+          selection_style
+        )
+      else
+        cursor_pos = get_visible_cursor_position(normalized_state, content_width)
+        padded_text = String.pad_trailing(display_text, content_width)
+
+        if focused do
+          insert_cursor(padded_text, cursor_pos, content_style)
+        else
+          [Segment.new(padded_text, content_style)]
+        end
+      end
+
+    strips = [
+      Strip.new([
+        Segment.new(top_border, border_style),
+        Segment.new(
+          String.duplicate(" ", max(0, rect.width - String.length(top_border))),
+          bg_style
+        )
+      ]),
+      Strip.new(
+        [
+          Segment.new("│", border_style)
+        ] ++
+          content_segments ++
+          [
+            Segment.new("│", border_style),
+            Segment.new(String.duplicate(" ", max(0, rect.width - content_width - 2)), bg_style)
+          ]
+      ),
+      Strip.new([
+        Segment.new(bottom_border, border_style),
+        Segment.new(
+          String.duplicate(" ", max(0, rect.width - String.length(bottom_border))),
+          bg_style
+        )
+      ])
+    ]
+
+    error_strips =
+      if error do
+        error_style = %{fg: {186, 60, 91}}
+        [Strip.new([Segment.new("  " <> error, error_style)])]
+      else
+        []
+      end
+
+    all_strips = strips ++ error_strips
+
+    target_height = rect.height
+    current_height = length(all_strips)
+
+    if current_height < target_height do
+      empty_line = Strip.from_text(String.duplicate(" ", rect.width))
+      padding_lines = List.duplicate(empty_line, target_height - current_height)
+      all_strips ++ padding_lines
+    else
+      Enum.take(all_strips, target_height)
+    end
+  end
+
+  @impl Drafter.Widget
+  def handle_event(event, state) do
+    if state.disabled or state.readonly do
+      handle_readonly_event(event, state)
+    else
+      handle_editable_event(event, state)
+    end
+  end
+
+  defp handle_readonly_event(event, state) do
+    case event do
+      {:focus} -> {:ok, %{state | focused: true}}
+      {:blur} -> {:ok, %{state | focused: false}}
+      :activate -> {:ok, %{state | focused: true}}
+      _ -> {:noreply, state}
+    end
+  end
+
+  defp handle_editable_event(event, state) do
+    case event do
+      {:key, :left, [:shift]} when state.focused ->
+        new_position = max(0, state.cursor_position - 1)
+        new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :right, [:shift]} when state.focused ->
+        text_length = String.length(state.text)
+        new_position = min(text_length, state.cursor_position + 1)
+        new_state = extend_selection(state, new_position) |> adjust_scroll_offset()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :home, [:shift]} when state.focused ->
+        new_state = extend_selection(state, 0) |> adjust_scroll_offset()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :end, [:shift]} when state.focused ->
+        text_length = String.length(state.text)
+        new_state = extend_selection(state, text_length) |> adjust_scroll_offset()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :left} when state.focused ->
+        new_position = max(0, state.cursor_position - 1)
+
+        new_state =
+          clear_selection(state)
+          |> Map.put(:cursor_position, new_position)
+          |> adjust_scroll_offset()
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :right} when state.focused ->
+        text_length = String.length(state.text)
+        new_position = min(text_length, state.cursor_position + 1)
+
+        new_state =
+          clear_selection(state)
+          |> Map.put(:cursor_position, new_position)
+          |> adjust_scroll_offset()
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :home} when state.focused ->
+        new_state =
+          clear_selection(state) |> Map.put(:cursor_position, 0) |> Map.put(:scroll_offset, 0)
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :end} when state.focused ->
+        text_length = String.length(state.text)
+
+        new_state =
+          clear_selection(state)
+          |> Map.put(:cursor_position, text_length)
+          |> adjust_scroll_offset()
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :backspace} when state.focused ->
+        if has_selection?(state) do
+          delete_selection(state)
+        else
+          if state.cursor_position > 0 do
+            {before, after_text} = String.split_at(state.text, state.cursor_position)
+            new_text = String.slice(before, 0..-2//1) <> after_text
+
+            new_state =
+              %{state | text: new_text, cursor_position: state.cursor_position - 1}
+              |> adjust_scroll_offset()
+
+            trigger_change(new_state)
+            {:ok, new_state}
+          else
+            {:noreply, state}
+          end
+        end
+
+      {:key, :delete} when state.focused ->
+        if has_selection?(state) do
+          delete_selection(state)
+        else
+          if state.cursor_position < String.length(state.text) do
+            {before, after_text} = String.split_at(state.text, state.cursor_position)
+            new_text = before <> String.slice(after_text, 1..-1//1)
+            new_state = %{state | text: new_text}
+            trigger_change(new_state)
+            {:ok, new_state}
+          else
+            {:noreply, state}
+          end
+        end
+
+      {:key, :c, [:ctrl]} when state.focused ->
+        if has_selection?(state) do
+          copy_selection(state)
+        end
+
+        {:noreply, state}
+
+      {:key, :x, [:ctrl]} when state.focused ->
+        if has_selection?(state) do
+          new_state = cut_selection(state)
+          {:ok, new_state}
+        else
+          {:noreply, state}
+        end
+
+      {:key, :v, [:ctrl]} when state.focused ->
+        paste_from_clipboard(state)
+
+      {:key, :a, [:ctrl]} when state.focused ->
+        text_length = String.length(state.text)
+
+        new_state = %{
+          state
+          | selection_start: 0,
+            selection_end: text_length,
+            cursor_position: text_length
+        }
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :enter} when state.focused ->
+        trigger_submit(state)
+        {:noreply, state}
+
+      {:key, :d, [:ctrl]} when state.focused ->
+        {:noreply, state}
+
+      {:key, :" "} when state.focused ->
+        if can_insert_char?(state) do
+          if has_selection?(state) do
+            insert_char_replace_selection(state, " ")
+          else
+            insert_char(state, " ")
+          end
+        else
+          {:noreply, state}
+        end
+
+      {:key, key, [:ctrl]} when state.focused and key in [:left, :right] ->
+        handle_word_navigation(state, key)
+
+      {:key, key, [:ctrl, :shift]} when state.focused and key in [:left, :right] ->
+        handle_word_selection(state, key)
+
+      {:key, _key, [:ctrl]} when state.focused ->
+        {:bubble, state}
+
+      {:key, _key, [:ctrl | _]} when state.focused ->
+        {:bubble, state}
+
+      {:char, char} when state.focused and is_integer(char) ->
+        char_str = <<char::utf8>>
+
+        if printable_char?(char_str) and can_insert_char?(state) do
+          if has_selection?(state) do
+            insert_char_replace_selection(state, char_str)
+          else
+            insert_char(state, char_str)
+          end
+        else
+          {:noreply, state}
+        end
+
+      {:key, key} when state.focused and is_atom(key) ->
+        char = Atom.to_string(key)
+
+        if printable_char?(char) and can_insert_char?(state) do
+          if has_selection?(state) do
+            insert_char_replace_selection(state, char)
+          else
+            insert_char(state, char)
+          end
+        else
+          {:noreply, state}
+        end
+
+      {:mouse, %{type: :click, x: x}} ->
+        click_pos = max(0, x - 1)
+        actual_pos = min(click_pos + state.scroll_offset, String.length(state.text))
+
+        new_state =
+          clear_selection(state)
+          |> Map.put(:focused, true)
+          |> Map.put(:cursor_position, actual_pos)
+          |> adjust_scroll_offset()
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:mouse, %{type: :drag, x: x}} ->
+        drag_pos = max(0, x - 1)
+        actual_pos = min(drag_pos + state.scroll_offset, String.length(state.text))
+
+        new_state =
+          state
+          |> Map.put(:focused, true)
+          |> Map.put(:cursor_position, actual_pos)
+          |> extend_selection(actual_pos)
+          |> adjust_scroll_offset()
+
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      :activate ->
+        {:ok, %{state | focused: true}}
+
+      {:focus} ->
+        {:ok, %{state | focused: true}}
+
+      {:blur} ->
+        new_state = %{state | focused: false, touched: true}
+        new_state = validate_if_touched(new_state)
+        {:ok, new_state}
+
+      :validate ->
+        new_state = do_validate(state)
+        {:ok, new_state}
+
+      :clear_error ->
+        {:ok, %{state | error: nil}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl Drafter.Widget
+  def update(props, state) do
+    %{
+      state
+      | text: Map.get(props, :text, state.text),
+        placeholder: Map.get(props, :placeholder, state.placeholder),
+        focused: Map.get(props, :focused, state.focused),
+        style: Map.get(props, :style, state.style),
+        classes: Map.get(props, :classes, state.classes),
+        on_change: Map.get(props, :on_change, state.on_change),
+        on_submit: Map.get(props, :on_submit, state.on_submit),
+        max_length: Map.get(props, :max_length, state.max_length),
+        width: Map.get(props, :width, state.width),
+        selection_start: Map.get(props, :selection_start, state.selection_start),
+        selection_end: Map.get(props, :selection_end, state.selection_end),
+        app_module: Map.get(props, :app_module, state.app_module),
+        validators: Map.get(props, :validators, state.validators),
+        error: Map.get(props, :error, state.error),
+        touched: Map.get(props, :touched, state.touched),
+        disabled: Map.get(props, :disabled, state.disabled),
+        readonly: Map.get(props, :readonly, state.readonly)
+    }
+  end
+
+  defp validate_if_touched(state) do
+    if state.touched and state.validators do
+      do_validate(state)
+    else
+      state
+    end
+  end
+
+  defp do_validate(state) do
+    case state.validators do
+      nil ->
+        %{state | error: nil}
+
+      validators ->
+        case Drafter.Validation.validate(state.text, validators) do
+          :ok -> %{state | error: nil}
+          {:error, message} -> %{state | error: message}
+        end
+    end
+  end
+
+  defp get_display_text(state, content_width) do
+    text = Map.get(state, :text, "")
+    placeholder = Map.get(state, :placeholder, "")
+    focused = Map.get(state, :focused, false)
+    scroll_offset = Map.get(state, :scroll_offset, 0)
+
+    # Show placeholder when text is empty and not focused
+    if String.length(text) == 0 and not focused do
+      # Use placeholder style for placeholder text  
+      String.slice(placeholder, 0, content_width)
+    else
+      # Show actual text (may be empty when focused)
+      visible_text = String.slice(text, scroll_offset, content_width)
+      visible_text
+    end
+  end
+
+  defp get_visible_cursor_position(state, _content_width) do
+    state.cursor_position - state.scroll_offset
+  end
+
+  defp insert_cursor(text, position, style) do
+    if position >= 0 and position < String.length(text) do
+      {before, after_text} = String.split_at(text, position)
+      cursor_char = String.first(after_text) || " "
+      rest = String.slice(after_text, 1..-1//1) || ""
+
+      [
+        Segment.new(before, style),
+        Segment.new(cursor_char, Map.put(style, :reverse, true)),
+        Segment.new(rest, style)
+      ]
+    else
+      [Segment.new(text, style), Segment.new("█", Map.put(style, :reverse, true))]
+    end
+  end
+
+  defp adjust_scroll_offset(state) do
+    # Account for borders
+    content_width = state.width - 2
+
+    cond do
+      # Cursor is to the left of visible area
+      state.cursor_position < state.scroll_offset ->
+        %{state | scroll_offset: state.cursor_position}
+
+      # Cursor is to the right of visible area
+      state.cursor_position >= state.scroll_offset + content_width ->
+        %{state | scroll_offset: state.cursor_position - content_width + 1}
+
+      # Cursor is within visible area
+      true ->
+        state
+    end
+  end
+
+  defp printable_char?(char) do
+    String.length(char) == 1 and String.printable?(char) and char not in ["\t", "\n", "\r"]
+  end
+
+  defp can_insert_char?(state) do
+    case state.max_length do
+      nil -> true
+      max_len -> String.length(state.text) < max_len
+    end
+  end
+
+  defp insert_char(state, char) do
+    {before, after_text} = String.split_at(state.text, state.cursor_position)
+    new_text = before <> char <> after_text
+
+    new_state =
+      %{state | text: new_text, cursor_position: state.cursor_position + 1}
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp trigger_change(state) do
+    if state.on_change do
+      try do
+        state.on_change.(state.text)
+      rescue
+        _error -> :ok
+      end
+    end
+  end
+
+  defp trigger_submit(state) do
+    if state.on_submit do
+      try do
+        state.on_submit.(state.text)
+      rescue
+        _error -> :ok
+      end
+    end
+  end
+
+  defp has_selection?(state) do
+    state.selection_start != nil and state.selection_end != nil
+  end
+
+  defp clear_selection(state) do
+    %{state | selection_start: nil, selection_end: nil}
+  end
+
+  defp extend_selection(state, new_position) do
+    if state.selection_start == nil do
+      %{state | selection_start: state.cursor_position, selection_end: new_position}
+    else
+      %{state | selection_end: new_position}
+    end
+  end
+
+  defp get_selection_range(state) do
+    if has_selection?(state) do
+      start_pos = min(state.selection_start, state.selection_end)
+      end_pos = max(state.selection_start, state.selection_end)
+      {start_pos, end_pos}
+    else
+      nil
+    end
+  end
+
+  defp render_with_selection(state, display_text, content_width, normal_style, selection_style) do
+    {sel_start, sel_end} = get_selection_range(state)
+    scroll_offset = state.scroll_offset
+
+    visible_start = max(0, sel_start - scroll_offset)
+    visible_end = max(0, sel_end - scroll_offset)
+
+    text_len = String.length(display_text)
+    visible_start = min(visible_start, text_len)
+    visible_end = min(visible_end, text_len)
+
+    if visible_start >= visible_end do
+      cursor_pos = get_visible_cursor_position(state, content_width)
+      padded_text = String.pad_trailing(display_text, content_width)
+      insert_cursor(padded_text, cursor_pos, normal_style)
+    else
+      before_text = String.slice(display_text, 0, visible_start)
+      selected_text = String.slice(display_text, visible_start, visible_end - visible_start)
+      after_text = String.slice(display_text, visible_end..-1//1)
+
+      segments = []
+
+      segments =
+        if String.length(before_text) > 0 do
+          segments ++ [Segment.new(before_text, normal_style)]
+        else
+          segments
+        end
+
+      segments = segments ++ [Segment.new(selected_text, selection_style)]
+
+      segments =
+        if String.length(after_text) > 0 do
+          segments ++ [Segment.new(after_text, normal_style)]
+        else
+          segments
+        end
+
+      total_visible_len =
+        String.length(before_text) + String.length(selected_text) + String.length(after_text)
+
+      if total_visible_len < content_width do
+        padding = String.duplicate(" ", content_width - total_visible_len)
+        segments ++ [Segment.new(padding, normal_style)]
+      else
+        segments
+      end
+    end
+  end
+
+  defp delete_selection(state) do
+    {sel_start, sel_end} = get_selection_range(state)
+    {before, _middle, after_text} = split_text_at_selection(state.text, sel_start, sel_end)
+    new_text = before <> after_text
+
+    new_state =
+      %{
+        state
+        | text: new_text,
+          cursor_position: sel_start,
+          selection_start: nil,
+          selection_end: nil
+      }
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp insert_char_replace_selection(state, char) do
+    {sel_start, sel_end} = get_selection_range(state)
+    {before, _middle, after_text} = split_text_at_selection(state.text, sel_start, sel_end)
+    new_text = before <> char <> after_text
+
+    new_state =
+      %{
+        state
+        | text: new_text,
+          cursor_position: sel_start + 1,
+          selection_start: nil,
+          selection_end: nil
+      }
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp split_text_at_selection(text, sel_start, sel_end) do
+    before = String.slice(text, 0, sel_start)
+    selected = String.slice(text, sel_start, sel_end - sel_start)
+    after_text = String.slice(text, sel_end..-1//1)
+    {before, selected, after_text}
+  end
+
+  defp copy_selection(state) do
+    {sel_start, sel_end} = get_selection_range(state)
+    selected_text = String.slice(state.text, sel_start, sel_end - sel_start)
+
+    case :os.type() do
+      {:unix, :darwin} ->
+        escaped_text = String.replace(selected_text, "\"", "\\\"")
+        System.cmd("osascript", ["-e", "set the clipboard to \"" <> escaped_text <> "\""])
+
+      {:unix, _} ->
+        try do
+          if File.exists?("/tmp/.clipboard-unicode") do
+            File.write!("/tmp/.clipboard-unicode", selected_text)
+          end
+        rescue
+          _ -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp cut_selection(state) do
+    copy_selection(state)
+    {sel_start, sel_end} = get_selection_range(state)
+    {before, _middle, after_text} = split_text_at_selection(state.text, sel_start, sel_end)
+    new_text = before <> after_text
+
+    new_state =
+      %{
+        state
+        | text: new_text,
+          cursor_position: sel_start,
+          selection_start: nil,
+          selection_end: nil
+      }
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    new_state
+  end
+
+  defp paste_from_clipboard(state) do
+    clipboard_text =
+      case :os.type() do
+        {:unix, :darwin} ->
+          {text, _} = System.cmd("pbpaste", [])
+          String.trim(text)
+
+        {:unix, _} ->
+          case File.read("/tmp/.clipboard-unicode") do
+            {:ok, text} -> text
+            _ -> ""
+          end
+
+        _ ->
+          ""
+      end
+
+    if has_selection?(state) do
+      {sel_start, sel_end} = get_selection_range(state)
+      {before, _middle, after_text} = split_text_at_selection(state.text, sel_start, sel_end)
+      new_text = before <> clipboard_text <> after_text
+      new_position = sel_start + String.length(clipboard_text)
+
+      new_state =
+        %{
+          state
+          | text: new_text,
+            cursor_position: new_position,
+            selection_start: nil,
+            selection_end: nil
+        }
+        |> adjust_scroll_offset()
+
+      trigger_change(new_state)
+      {:ok, new_state}
+    else
+      {before, after_text} = String.split_at(state.text, state.cursor_position)
+      new_text = before <> clipboard_text <> after_text
+      new_position = state.cursor_position + String.length(clipboard_text)
+
+      new_state =
+        %{state | text: new_text, cursor_position: new_position} |> adjust_scroll_offset()
+
+      trigger_change(new_state)
+      {:ok, new_state}
+    end
+  end
+
+  defp handle_word_navigation(state, :left) do
+    new_position = find_word_boundary(state.text, state.cursor_position, :left)
+
+    new_state =
+      clear_selection(state) |> Map.put(:cursor_position, new_position) |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_word_navigation(state, :right) do
+    new_position = find_word_boundary(state.text, state.cursor_position, :right)
+
+    new_state =
+      clear_selection(state) |> Map.put(:cursor_position, new_position) |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_word_selection(state, :left) do
+    new_position = find_word_boundary(state.text, state.cursor_position, :left)
+
+    new_state =
+      extend_selection(state, new_position)
+      |> Map.put(:cursor_position, new_position)
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp handle_word_selection(state, :right) do
+    new_position = find_word_boundary(state.text, state.cursor_position, :right)
+
+    new_state =
+      extend_selection(state, new_position)
+      |> Map.put(:cursor_position, new_position)
+      |> adjust_scroll_offset()
+
+    trigger_change(new_state)
+    {:ok, new_state}
+  end
+
+  defp find_word_boundary(text, position, direction) do
+    text_len = String.length(text)
+
+    cond do
+      direction == :left and position == 0 ->
+        0
+
+      direction == :right and position >= text_len ->
+        text_len
+
+      true ->
+        graphemes = String.graphemes(text)
+        current_index = position
+
+        if direction == :left do
+          skip_non_word_chars(graphemes, current_index - 1, :left)
+        else
+          skip_word_chars(graphemes, current_index, :right)
+        end
+    end
+  end
+
+  defp skip_word_chars(graphemes, index, direction) do
+    len = length(graphemes)
+
+    cond do
+      index >= len ->
+        len
+
+      direction == :right ->
+        if index < len and word_char?(Enum.at(graphemes, index, "")) do
+          skip_word_chars(graphemes, index + 1, :right)
+        else
+          index
+        end
+
+      true ->
+        index
+    end
+  end
+
+  defp skip_non_word_chars(graphemes, index, direction) do
+    cond do
+      index < 0 ->
+        0
+
+      direction == :left ->
+        if index >= 0 and not word_char?(Enum.at(graphemes, index, "")) do
+          skip_non_word_chars(graphemes, index - 1, :left)
+        else
+          index + 1
+        end
+
+      true ->
+        index
+    end
+  end
+
+  defp word_char?(char) do
+    case Regex.run(~r/^\w$/, char) do
+      nil -> false
+      _ -> true
+    end
+  end
+end

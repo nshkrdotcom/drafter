@@ -1,0 +1,367 @@
+defmodule Drafter.LayerCompositor do
+  @moduledoc """
+  Layered composition system for TUI rendering.
+
+  Provides clean layer-based composition similar to modern graphics systems.
+  Each layer renders independently and is composited together while preserving
+  styling and transparency.
+
+  Layer types (in render order):
+  1. Background - Base theme colors, panels, backgrounds  
+  2. Content - Text content, panels, cards
+  3. Widgets - Interactive elements (buttons, inputs, etc.)
+  4. Chrome - UI decorations (borders, scrollbars, focus indicators)
+  """
+
+  alias Drafter.Draw.{Strip, Segment}
+
+  @type layer :: %{
+          id: atom(),
+          z_index: integer(),
+          strips: [Strip.t()],
+          bounds: %{x: integer(), y: integer(), width: integer(), height: integer()}
+        }
+
+  @type viewport :: %{width: integer(), height: integer()}
+  @type composition_result :: [Strip.t()]
+
+  @doc """
+  Create a new layer for composition.
+
+  ## Parameters
+  - id: Unique identifier for the layer
+  - strips: Rendered strips for this layer
+  - bounds: Rendering bounds %{x: x, y: y, width: w, height: h}
+  - z_index: Layer depth (higher = on top)
+  """
+  def create_layer(id, strips, bounds, z_index \\ 0) do
+    %{
+      id: id,
+      strips: strips || [],
+      bounds: bounds,
+      z_index: z_index
+    }
+  end
+
+  @doc """
+  Composite multiple layers into a final rendered view.
+
+  Layers are composited in z_index order (lowest to highest).
+  Each layer's content is placed at its bounds position.
+  """
+  def composite(layers, viewport) when is_list(layers) do
+    # Sort layers by z_index (background to foreground)
+    sorted_layers = Enum.sort_by(layers, & &1.z_index)
+
+    # Initialize canvas with empty strips
+    canvas = initialize_canvas(viewport)
+
+    # Composite each layer onto the canvas
+    Enum.reduce(sorted_layers, canvas, fn layer, current_canvas ->
+      composite_layer(current_canvas, layer, viewport)
+    end)
+  end
+
+  @doc """
+  Create a background layer with theme-based styling.
+  """
+  def background_layer(strips, bounds) do
+    create_layer(:background, strips, bounds, 0)
+  end
+
+  @doc """
+  Create a content layer for panels, text, etc.
+  """
+  def content_layer(id, strips, bounds) do
+    create_layer(id, strips, bounds, 10)
+  end
+
+  @doc """
+  Create a widget layer for interactive elements.
+  """
+  def widget_layer(widget_id, strips, bounds) do
+    z_index = cond do
+      :erlang.atom_to_binary(widget_id) |> String.starts_with?("footer") -> 50
+      :erlang.atom_to_binary(widget_id) |> String.starts_with?("header") -> 40
+      true -> 20
+    end
+
+    create_layer(widget_id, strips, bounds, z_index)
+  end
+
+  @doc """
+  Create a chrome layer for UI decorations.
+  """
+  def chrome_layer(id, strips, bounds) do
+    create_layer(id, strips, bounds, 30)
+  end
+
+  # Private functions
+
+  defp initialize_canvas(viewport) do
+    empty_text = String.duplicate(" ", viewport.width)
+    empty_segment = Segment.new(empty_text, %{})
+    empty_strip = Strip.new([empty_segment])
+    List.duplicate(empty_strip, viewport.height)
+  end
+
+  defp composite_layer(canvas, layer, viewport) do
+    bounds = layer.bounds
+    layer_strips = layer.strips || []
+
+    Enum.with_index(canvas)
+    |> Enum.map(fn {canvas_strip, row_index} ->
+      layer_row = row_index - bounds.y
+
+      if layer_row >= 0 and layer_row < length(layer_strips) and
+           row_index >= bounds.y and row_index < bounds.y + bounds.height and
+           bounds.x < viewport.width do
+        layer_strip = Enum.at(layer_strips, layer_row)
+        composite_strips_at_position(canvas_strip, layer_strip, bounds.x, viewport.width)
+      else
+        canvas_strip
+      end
+    end)
+  end
+
+  defp composite_strips_at_position(canvas_strip, layer_strip, x_offset, viewport_width) do
+    canvas_segments = canvas_strip.segments || []
+    layer_segments = layer_strip.segments || []
+
+    if length(layer_segments) == 0 or x_offset < 0 or x_offset >= viewport_width do
+      canvas_strip
+    else
+      layer_width = Strip.width(layer_strip)
+      layer_end = min(x_offset + layer_width, viewport_width)
+      actual_layer_width = layer_end - x_offset
+
+      canvas_width = Strip.width(canvas_strip)
+
+      if x_offset >= canvas_width or actual_layer_width <= 0 do
+        canvas_strip
+      else
+        composite_segments_properly(
+          canvas_segments,
+          layer_segments,
+          x_offset,
+          actual_layer_width,
+          viewport_width
+        )
+      end
+    end
+  end
+
+  defp composite_segments_properly(
+         canvas_segments,
+         layer_segments,
+         layer_x,
+         layer_width,
+         viewport_width
+       ) do
+    canvas_graphemes = build_grapheme_list(canvas_segments)
+    layer_graphemes = build_grapheme_list(layer_segments)
+
+    default_style = if length(canvas_segments) > 0, do: hd(canvas_segments).style, else: %{}
+
+    layer_end = min(layer_x + layer_width, viewport_width)
+
+    {final_graphemes, _, _} =
+      composite_columns(
+        0,
+        viewport_width,
+        layer_x,
+        layer_end,
+        canvas_graphemes,
+        layer_graphemes,
+        default_style,
+        []
+      )
+
+    final_graphemes = Enum.reverse(final_graphemes)
+
+    final_segments =
+      final_graphemes
+      |> Enum.chunk_by(fn {_col, _char, style} -> style end)
+      |> Enum.map(fn chunk ->
+        text = chunk |> Enum.map(fn {_col, ch, _style} -> ch end) |> Enum.join("")
+        {_col, _char, style} = hd(chunk)
+        Segment.new(text, style)
+      end)
+
+    Strip.new(final_segments)
+  end
+
+  defp composite_columns(
+         col,
+         viewport_width,
+         _layer_x,
+         _layer_end,
+         _canvas,
+         _layer,
+         _default_style,
+         acc
+       )
+       when col >= viewport_width do
+    {acc, nil, nil}
+  end
+
+  defp composite_columns(
+         col,
+         viewport_width,
+         layer_x,
+         layer_end,
+         canvas_graphemes,
+         layer_graphemes,
+         default_style,
+         acc
+       ) do
+    in_layer_region = col >= layer_x and col < layer_end
+
+    {grapheme, style, width, new_canvas, new_layer} =
+      if in_layer_region do
+        layer_col = col - layer_x
+
+        case pop_grapheme_at_col(layer_graphemes, layer_col) do
+          {:ok, {g, s, w}, rest} ->
+            {_, new_canvas_rest} = skip_columns(canvas_graphemes, col, w)
+            {g, s, w, new_canvas_rest, rest}
+
+          :none ->
+            case pop_grapheme_at_col(canvas_graphemes, col) do
+              {:ok, {g, s, w}, rest} -> {g, s, w, rest, layer_graphemes}
+              :none -> {" ", default_style, 1, canvas_graphemes, layer_graphemes}
+            end
+        end
+      else
+        case pop_grapheme_at_col(canvas_graphemes, col) do
+          {:ok, {g, s, w}, rest} -> {g, s, w, rest, layer_graphemes}
+          :none -> {" ", default_style, 1, canvas_graphemes, layer_graphemes}
+        end
+      end
+
+    new_acc = [{col, grapheme, style} | acc]
+    next_col = col + width
+
+    composite_columns(
+      next_col,
+      viewport_width,
+      layer_x,
+      layer_end,
+      new_canvas,
+      new_layer,
+      default_style,
+      new_acc
+    )
+  end
+
+  defp build_grapheme_list(segments) do
+    ansi_pattern = ~r/\e\[[0-9;]*m/
+
+    {graphemes, _col} =
+      Enum.reduce(segments, {[], 0}, fn segment, {acc, col} ->
+        parts = Regex.split(ansi_pattern, segment.text, include_captures: true)
+
+        {part_acc, part_col, _current_style} =
+          Enum.reduce(parts, {acc, col, segment.style}, fn part, {g_acc, current_col, style} ->
+            if Regex.match?(ansi_pattern, part) do
+              new_style = parse_ansi_to_style(part, style)
+              {g_acc, current_col, new_style}
+            else
+              part
+              |> String.graphemes()
+              |> Enum.reduce({g_acc, current_col, style}, fn grapheme, {ga, cc, s} ->
+                width = char_width(grapheme)
+                {[{cc, grapheme, s, width} | ga], cc + width, s}
+              end)
+            end
+          end)
+
+        {part_acc, part_col}
+      end)
+
+    Enum.reverse(graphemes)
+  end
+
+  defp parse_ansi_to_style("\e[0m", _current_style), do: %{}
+
+  defp parse_ansi_to_style(ansi_code, current_style) do
+    code_str = String.replace(ansi_code, ~r/\e\[|m/, "")
+    codes = String.split(code_str, ";")
+
+    Enum.reduce(codes, current_style, fn code, style ->
+      case code do
+        "1" -> Map.put(style, :bold, true)
+        "2" -> Map.put(style, :dim, true)
+        "3" -> Map.put(style, :italic, true)
+        "4" -> Map.put(style, :underline, true)
+        "7" -> Map.put(style, :reverse, true)
+        "90" -> Map.put(style, :fg, {128, 128, 128})
+        "30" -> Map.put(style, :fg, {0, 0, 0})
+        "31" -> Map.put(style, :fg, {205, 49, 49})
+        "32" -> Map.put(style, :fg, {13, 188, 121})
+        "33" -> Map.put(style, :fg, {229, 229, 16})
+        "34" -> Map.put(style, :fg, {36, 114, 200})
+        "35" -> Map.put(style, :fg, {188, 63, 188})
+        "36" -> Map.put(style, :fg, {17, 168, 205})
+        "37" -> Map.put(style, :fg, {229, 229, 229})
+        _ ->
+          parse_extended_color(code, codes, style)
+      end
+    end)
+  end
+
+  defp parse_extended_color(_code, codes, style) do
+    case codes do
+      ["38", "2", r, g, b | _] ->
+        Map.put(style, :fg, {String.to_integer(r), String.to_integer(g), String.to_integer(b)})
+
+      ["48", "2", r, g, b | _] ->
+        Map.put(style, :bg, {String.to_integer(r), String.to_integer(g), String.to_integer(b)})
+
+      _ ->
+        style
+    end
+  end
+
+  defp pop_grapheme_at_col([{col, grapheme, style, width} | rest], target_col)
+       when col == target_col do
+    {:ok, {grapheme, style, width}, rest}
+  end
+
+  defp pop_grapheme_at_col([{col, _grapheme, _style, width} | rest], target_col)
+       when col + width <= target_col do
+    pop_grapheme_at_col(rest, target_col)
+  end
+
+  defp pop_grapheme_at_col(_, _), do: :none
+
+  defp skip_columns(graphemes, start_col, width_to_skip) do
+    end_col = start_col + width_to_skip
+    remaining = Enum.drop_while(graphemes, fn {col, _g, _s, w} -> col + w <= end_col end)
+    {:ok, remaining}
+  end
+
+  defp char_width(grapheme) do
+    case String.to_charlist(grapheme) do
+      [codepoint | _] ->
+        cond do
+          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
+          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
+          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
+          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
+          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
+          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
+          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
+          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
+          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
+          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
+          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
+          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
+          true -> 1
+        end
+
+      [] ->
+        0
+    end
+  end
+end

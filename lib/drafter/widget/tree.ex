@@ -1,0 +1,699 @@
+defmodule Drafter.Widget.Tree do
+  @moduledoc """
+  A hierarchical tree widget that renders nested nodes with expand/collapse controls.
+
+  Expanded nodes show a `▼` prefix; collapsed nodes with children show `▶`; leaf nodes
+  show an indent. Optional icons are displayed after the expansion character when
+  `:show_icons` is enabled and a node provides an `:icon` field.
+
+  The cursor moves through the currently visible (flattened) display list, which only
+  includes children of expanded parent nodes.
+
+  ## Node format
+
+  Each node in the `:data` list is a map with the following fields:
+
+    * `:id` — unique identifier for the node (required; used to track expansion state)
+    * `:label` — display string (required)
+    * `:children` — list of child nodes in the same format (default: `[]`)
+    * `:expanded` — whether the node starts expanded (default: `false`)
+    * `:icon` — optional string icon displayed before the label
+    * `:metadata` — arbitrary map stored on the node, passed to callbacks
+
+  Shorthand formats are also accepted:
+    * A bare string becomes `%{label: string, children: []}`
+    * `{"label", [children]}` becomes a node with that label and children list
+
+  ## Options
+
+    * `:data` - list of root nodes (required)
+    * `:selection_mode` - `:none`, `:single` (default), or `:multiple`
+    * `:on_select` - `([node] -> term())` called with the list of selected nodes on selection change
+    * `:on_expand` - `(node, boolean() -> term())` called when a node is expanded or collapsed
+    * `:show_icons` - render node `:icon` fields (default: `true`)
+    * `:indent_size` - spaces per depth level (default: `2`)
+    * `:width` - widget width in columns (default: `80`)
+    * `:height` - widget height in rows (default: `20`)
+
+  ## Key bindings
+
+    * `↑` / `↓` — move cursor through visible nodes
+    * `←` — collapse the current node
+    * `→` — expand the current node
+    * `Enter` — toggle expand/collapse of the current node
+    * `Space` — toggle selection of the current node
+    * `+` — expand current node
+    * `-` — collapse current node
+    * `*` — expand all nodes
+    * `/` — collapse all nodes
+    * Mouse click — move cursor and toggle expand/collapse
+
+  ## Usage
+
+      tree(
+        data: [
+          %{id: :lib, label: "lib", children: [
+            %{id: :app, label: "app.ex"},
+            %{id: :router, label: "router.ex"}
+          ]},
+          %{id: :test, label: "test", children: []}
+        ],
+        on_select: fn nodes -> IO.inspect(nodes) end
+      )
+  """
+
+  use Drafter.Widget,
+    focusable: true
+
+  alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.ThemeManager
+
+  defstruct [
+    :data,
+    :cursor_index,
+    :expanded_nodes,
+    :selected_nodes,
+    :scroll_offset,
+    :focused,
+    :style,
+    :selected_style,
+    :cursor_style,
+    :expanded_style,
+    :collapsed_style,
+    :selection_mode,
+    :on_select,
+    :on_expand,
+    :show_icons,
+    :indent_size,
+    :width,
+    :height
+  ]
+
+  @type tree_node :: %{
+          id: term(),
+          label: String.t(),
+          children: [tree_node()] | nil,
+          expanded: boolean(),
+          icon: String.t() | nil,
+          metadata: map()
+        }
+
+  @type selection_mode :: :none | :single | :multiple
+
+  @type t :: %__MODULE__{
+          data: [tree_node()],
+          cursor_index: non_neg_integer(),
+          expanded_nodes: MapSet.t(),
+          selected_nodes: MapSet.t(),
+          scroll_offset: non_neg_integer(),
+          focused: boolean(),
+          style: Segment.style(),
+          selected_style: Segment.style(),
+          cursor_style: Segment.style(),
+          expanded_style: Segment.style(),
+          collapsed_style: Segment.style(),
+          selection_mode: selection_mode(),
+          on_select: ([tree_node()] -> term()) | nil,
+          on_expand: (tree_node(), boolean() -> term()) | nil,
+          show_icons: boolean(),
+          indent_size: pos_integer(),
+          width: pos_integer(),
+          height: pos_integer()
+        }
+
+  @impl Drafter.Widget
+  def mount(props) do
+    raw_data = Map.get(props, :data, [])
+    normalized_data = normalize_tree_data(raw_data)
+
+    expanded_nodes =
+      normalized_data
+      |> flatten_tree()
+      |> Enum.filter(fn node -> Map.get(node, :expanded, false) end)
+      |> Enum.map(fn node -> node.id end)
+      |> MapSet.new()
+
+    %__MODULE__{
+      data: normalized_data,
+      cursor_index: 0,
+      expanded_nodes: expanded_nodes,
+      selected_nodes: MapSet.new(),
+      scroll_offset: 0,
+      focused: Map.get(props, :focused, false),
+      style: Map.get(props, :style, %{fg: {200, 200, 200}, bg: {30, 30, 30}}),
+      selected_style: Map.get(props, :selected_style, %{fg: {255, 255, 255}, bg: {0, 120, 215}}),
+      cursor_style:
+        Map.get(props, :cursor_style, %{fg: {255, 255, 255}, bg: {50, 100, 200}, bold: true}),
+      expanded_style: Map.get(props, :expanded_style, %{fg: {100, 200, 100}, bg: {30, 30, 30}}),
+      collapsed_style: Map.get(props, :collapsed_style, %{fg: {200, 200, 100}, bg: {30, 30, 30}}),
+      selection_mode: Map.get(props, :selection_mode, :single),
+      on_select: Map.get(props, :on_select),
+      on_expand: Map.get(props, :on_expand),
+      show_icons: Map.get(props, :show_icons, true),
+      indent_size: Map.get(props, :indent_size, 2),
+      width: Map.get(props, :width, 80),
+      height: Map.get(props, :height, 20)
+    }
+  end
+
+  @impl Drafter.Widget
+  def render(state, rect) do
+    normalized_state =
+      if is_struct(state, __MODULE__) do
+        state
+      else
+        mount(state)
+      end
+
+    theme = ThemeManager.get_current_theme()
+    normalized_state = apply_theme_styles(normalized_state, theme)
+
+    content_width = rect.width
+    content_height = rect.height
+
+    display_items = flatten_for_display(normalized_state)
+
+    visible_items =
+      display_items
+      |> Enum.slice(normalized_state.scroll_offset, content_height)
+
+    strips =
+      visible_items
+      |> Enum.with_index(normalized_state.scroll_offset)
+      |> Enum.map(fn {item, index} ->
+        render_tree_item(normalized_state, item, index, content_width)
+        |> Strip.crop(content_width)
+      end)
+
+    current_height = length(strips)
+
+    if current_height < content_height do
+      empty_style = normalized_state.style
+      empty_line = String.duplicate(" ", content_width)
+      empty_strip = Strip.new([Segment.new(empty_line, empty_style)])
+      padding = List.duplicate(empty_strip, content_height - current_height)
+      strips ++ padding
+    else
+      strips
+    end
+  end
+
+  @impl Drafter.Widget
+  def handle_event(event, state) do
+    case event do
+      {:key, :up} when state.focused ->
+        move_cursor_up(state)
+
+      {:key, :down} when state.focused ->
+        move_cursor_down(state)
+
+      {:key, :left} when state.focused ->
+        collapse_current_node(state)
+
+      {:key, :right} when state.focused ->
+        expand_current_node(state)
+
+      {:key, :enter} when state.focused ->
+        toggle_current_node(state)
+
+      {:key, :space} when state.focused ->
+        toggle_selection(state)
+
+      {:key, "+"} when state.focused ->
+        expand_current_node(state)
+
+      {:key, "-"} when state.focused ->
+        collapse_current_node(state)
+
+      {:key, "*"} when state.focused ->
+        expand_all_nodes(state)
+
+      {:key, "/"} when state.focused ->
+        collapse_all_nodes(state)
+
+      {:mouse, %{type: :click, x: _x, y: y}} ->
+        handle_mouse_click(state, y)
+
+      {:focus} ->
+        {:ok, %{state | focused: true}}
+
+      {:blur} ->
+        {:ok, %{state | focused: false}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl Drafter.Widget
+  def update(props, state) do
+    new_data = Map.get(props, :data, state.data)
+
+    # Preserve expansion state when data updates
+    normalized_data = normalize_tree_data(new_data)
+
+    # Adjust cursor if it's out of bounds
+    display_items = flatten_for_display(%{state | data: normalized_data})
+    max_index = max(0, length(display_items) - 1)
+    cursor_index = min(state.cursor_index, max_index)
+
+    %{
+      state
+      | data: normalized_data,
+        cursor_index: cursor_index,
+        selection_mode: Map.get(props, :selection_mode, state.selection_mode),
+        style: Map.get(props, :style, state.style),
+        selected_style: Map.get(props, :selected_style, state.selected_style),
+        cursor_style: Map.get(props, :cursor_style, state.cursor_style),
+        expanded_style: Map.get(props, :expanded_style, state.expanded_style),
+        collapsed_style: Map.get(props, :collapsed_style, state.collapsed_style),
+        on_select: Map.get(props, :on_select, state.on_select),
+        on_expand: Map.get(props, :on_expand, state.on_expand),
+        show_icons: Map.get(props, :show_icons, state.show_icons),
+        indent_size: Map.get(props, :indent_size, state.indent_size),
+        width: Map.get(props, :width, state.width),
+        height: Map.get(props, :height, state.height)
+    }
+  end
+
+  # Navigation functions
+
+  defp move_cursor_up(state) do
+    if state.cursor_index > 0 do
+      new_state =
+        %{state | cursor_index: state.cursor_index - 1}
+        |> adjust_scroll_vertical()
+
+      {:ok, new_state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp move_cursor_down(state) do
+    display_items = flatten_for_display(state)
+    max_index = length(display_items) - 1
+
+    if state.cursor_index < max_index do
+      new_state =
+        %{state | cursor_index: state.cursor_index + 1}
+        |> adjust_scroll_vertical()
+
+      {:ok, new_state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  # Expansion/collapse functions
+
+  defp expand_current_node(state) do
+    display_items = flatten_for_display(state)
+
+    if state.cursor_index < length(display_items) do
+      current_item = Enum.at(display_items, state.cursor_index)
+
+      if current_item.children && length(current_item.children) > 0 do
+        expanded_nodes = MapSet.put(state.expanded_nodes, current_item.id)
+        new_state = %{state | expanded_nodes: expanded_nodes}
+        trigger_expand(new_state, current_item, true)
+        {:ok, new_state}
+      else
+        {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp collapse_current_node(state) do
+    display_items = flatten_for_display(state)
+
+    if state.cursor_index < length(display_items) do
+      current_item = Enum.at(display_items, state.cursor_index)
+
+      if MapSet.member?(state.expanded_nodes, current_item.id) do
+        expanded_nodes = MapSet.delete(state.expanded_nodes, current_item.id)
+        new_state = %{state | expanded_nodes: expanded_nodes}
+        trigger_expand(new_state, current_item, false)
+        {:ok, new_state}
+      else
+        {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp toggle_current_node(state) do
+    display_items = flatten_for_display(state)
+
+    if state.cursor_index < length(display_items) do
+      current_item = Enum.at(display_items, state.cursor_index)
+
+      if current_item.children && length(current_item.children) > 0 do
+        if MapSet.member?(state.expanded_nodes, current_item.id) do
+          collapse_current_node(state)
+        else
+          expand_current_node(state)
+        end
+      else
+        {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp expand_all_nodes(state) do
+    all_nodes =
+      flatten_tree(state.data)
+      |> Enum.filter(fn node -> node.children && length(node.children) > 0 end)
+      |> Enum.map(fn node -> node.id end)
+      |> MapSet.new()
+
+    {:ok, %{state | expanded_nodes: all_nodes}}
+  end
+
+  defp collapse_all_nodes(state) do
+    {:ok, %{state | expanded_nodes: MapSet.new()}}
+  end
+
+  # Selection functions
+
+  defp toggle_selection(state) do
+    case state.selection_mode do
+      :none ->
+        {:noreply, state}
+
+      :single ->
+        display_items = flatten_for_display(state)
+
+        if state.cursor_index < length(display_items) do
+          current_item = Enum.at(display_items, state.cursor_index)
+
+          selected =
+            if MapSet.member?(state.selected_nodes, current_item.id) do
+              MapSet.new()
+            else
+              MapSet.new([current_item.id])
+            end
+
+          new_state = %{state | selected_nodes: selected}
+          trigger_selection(new_state)
+          {:ok, new_state}
+        else
+          {:noreply, state}
+        end
+
+      :multiple ->
+        display_items = flatten_for_display(state)
+
+        if state.cursor_index < length(display_items) do
+          current_item = Enum.at(display_items, state.cursor_index)
+
+          selected =
+            if MapSet.member?(state.selected_nodes, current_item.id) do
+              MapSet.delete(state.selected_nodes, current_item.id)
+            else
+              MapSet.put(state.selected_nodes, current_item.id)
+            end
+
+          new_state = %{state | selected_nodes: selected}
+          trigger_selection(new_state)
+          {:ok, new_state}
+        else
+          {:noreply, state}
+        end
+    end
+  end
+
+  # Mouse handling
+
+  defp handle_mouse_click(state, y) do
+    clicked_index = y + state.scroll_offset
+    display_items = flatten_for_display(state)
+
+    if clicked_index >= 0 && clicked_index < length(display_items) do
+      new_state = %{state | cursor_index: clicked_index, focused: true}
+      current_item = Enum.at(display_items, clicked_index)
+
+      if current_item.children && length(current_item.children) > 0 do
+        if MapSet.member?(new_state.expanded_nodes, current_item.id) do
+          expanded_nodes = MapSet.delete(new_state.expanded_nodes, current_item.id)
+          trigger_expand(new_state, current_item, false)
+          {:ok, %{new_state | expanded_nodes: expanded_nodes}}
+        else
+          expanded_nodes = MapSet.put(new_state.expanded_nodes, current_item.id)
+          trigger_expand(new_state, current_item, true)
+          {:ok, %{new_state | expanded_nodes: expanded_nodes}}
+        end
+      else
+        {:ok, new_state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  # Rendering functions
+
+  defp render_tree_item(state, item, index, width) do
+    is_cursor = state.focused && index == state.cursor_index
+    is_selected = MapSet.member?(state.selected_nodes, item.id)
+    is_expanded = MapSet.member?(state.expanded_nodes, item.id)
+
+    indent = String.duplicate(" ", item.depth * state.indent_size)
+
+    expansion_char =
+      cond do
+        item.children && length(item.children) > 0 ->
+          if is_expanded, do: "▼ ", else: "▶ "
+
+        true ->
+          "  "
+      end
+
+    icon =
+      if state.show_icons && item.icon do
+        item.icon <> "  "
+      else
+        ""
+      end
+
+    content = indent <> expansion_char <> icon <> item.label
+    content_display_width = display_width(content)
+
+    formatted_content =
+      if content_display_width >= width do
+        truncate_to_width(content, max(0, width - 2)) <> "…"
+      else
+        pad_to_width(content, width)
+      end
+
+    _formatted_width = display_width(formatted_content)
+
+    style =
+      cond do
+        is_cursor -> state.cursor_style
+        is_selected -> state.selected_style
+        is_expanded && item.children && length(item.children) > 0 -> state.expanded_style
+        item.children && length(item.children) > 0 -> state.collapsed_style
+        true -> state.style
+      end
+
+    Strip.new([Segment.new(formatted_content, style)])
+  end
+
+  # Helper functions
+
+  defp normalize_tree_data(data) when is_map(data) do
+    data
+    |> Map.to_list()
+    |> Enum.map(&normalize_node/1)
+  end
+
+  defp normalize_tree_data(data) when is_list(data) do
+    Enum.map(data, &normalize_node/1)
+  end
+
+  defp normalize_tree_data(_data), do: []
+
+  defp normalize_node(node) when is_map(node) do
+    children = Map.get(node, :children, [])
+
+    normalized_children =
+      if children && is_list(children) do
+        Enum.map(children, &normalize_node/1)
+      else
+        []
+      end
+
+    %{
+      id: Map.get(node, :id, :crypto.strong_rand_bytes(8)),
+      label: Map.get(node, :label, "Unnamed"),
+      children: normalized_children,
+      icon: Map.get(node, :icon),
+      metadata: Map.get(node, :metadata, %{})
+    }
+  end
+
+  defp normalize_node(node) when is_binary(node) do
+    %{
+      id: :crypto.strong_rand_bytes(8),
+      label: node,
+      children: [],
+      icon: nil,
+      metadata: %{}
+    }
+  end
+
+  defp normalize_node({label, children}) when is_binary(label) and is_list(children) do
+    %{
+      id: :crypto.strong_rand_bytes(8),
+      label: label,
+      children: Enum.map(children, &normalize_node/1),
+      icon: nil,
+      metadata: %{}
+    }
+  end
+
+  defp normalize_node({label, children}) when is_binary(label) and is_map(children) do
+    %{
+      id: :crypto.strong_rand_bytes(8),
+      label: label,
+      children: children |> Map.to_list() |> Enum.map(&normalize_node/1),
+      icon: nil,
+      metadata: %{}
+    }
+  end
+
+  defp flatten_tree(nodes) do
+    Enum.flat_map(nodes, fn node ->
+      [node] ++ flatten_tree(node.children || [])
+    end)
+  end
+
+  defp flatten_for_display(state, nodes \\ nil, depth \\ 0) do
+    nodes = nodes || state.data
+
+    Enum.flat_map(nodes, fn node ->
+      item_with_depth = Map.put(node, :depth, depth)
+
+      if MapSet.member?(state.expanded_nodes, node.id) && node.children do
+        [item_with_depth] ++ flatten_for_display(state, node.children, depth + 1)
+      else
+        [item_with_depth]
+      end
+    end)
+  end
+
+  defp adjust_scroll_vertical(state) do
+    cond do
+      state.cursor_index < state.scroll_offset ->
+        %{state | scroll_offset: state.cursor_index}
+
+      state.cursor_index >= state.scroll_offset + state.height ->
+        %{state | scroll_offset: state.cursor_index - state.height + 1}
+
+      true ->
+        state
+    end
+  end
+
+  defp trigger_selection(state) do
+    if state.on_select do
+      all_nodes = flatten_tree(state.data)
+
+      selected_data =
+        state.selected_nodes
+        |> MapSet.to_list()
+        |> Enum.map(fn id ->
+          Enum.find(all_nodes, fn node -> node.id == id end)
+        end)
+        |> Enum.filter(& &1)
+
+      try do
+        result = state.on_select.(selected_data)
+        result
+      rescue
+        _error -> :ok
+      end
+    end
+  end
+
+  defp trigger_expand(state, node, expanded) do
+    if state.on_expand do
+      try do
+        state.on_expand.(node, expanded)
+      rescue
+        _error -> :ok
+      end
+    end
+  end
+
+  defp apply_theme_styles(state, theme) do
+    %{
+      state
+      | style: %{fg: theme.text_primary, bg: theme.background},
+        selected_style: %{fg: theme.text_primary, bg: theme.primary},
+        cursor_style: %{fg: theme.text_primary, bg: theme.primary, bold: true},
+        expanded_style: %{fg: theme.success, bg: theme.background},
+        collapsed_style: %{fg: theme.warning, bg: theme.background}
+    }
+  end
+
+  defp display_width(str) do
+    str
+    |> String.graphemes()
+    |> Enum.reduce(0, fn grapheme, acc ->
+      acc + char_width(grapheme)
+    end)
+  end
+
+  defp char_width(grapheme) do
+    case String.to_charlist(grapheme) do
+      [codepoint | _] ->
+        cond do
+          codepoint >= 0x1F300 and codepoint <= 0x1F9FF -> 2
+          codepoint >= 0x2600 and codepoint <= 0x26FF -> 2
+          codepoint >= 0x2700 and codepoint <= 0x27BF -> 2
+          codepoint >= 0x1F600 and codepoint <= 0x1F64F -> 2
+          codepoint >= 0x1F680 and codepoint <= 0x1F6FF -> 2
+          codepoint >= 0x1100 and codepoint <= 0x11FF -> 2
+          codepoint >= 0x2E80 and codepoint <= 0x9FFF -> 2
+          codepoint >= 0xAC00 and codepoint <= 0xD7AF -> 2
+          codepoint >= 0xFE10 and codepoint <= 0xFE1F -> 2
+          codepoint >= 0xFE30 and codepoint <= 0xFE6F -> 2
+          codepoint >= 0xFF00 and codepoint <= 0xFF60 -> 2
+          codepoint >= 0xFFE0 and codepoint <= 0xFFE6 -> 2
+          true -> 1
+        end
+
+      [] ->
+        0
+    end
+  end
+
+  defp truncate_to_width(str, target_width) do
+    str
+    |> String.graphemes()
+    |> Enum.reduce_while({"", 0}, fn grapheme, {acc, width} ->
+      grapheme_w = char_width(grapheme)
+      new_width = width + grapheme_w
+
+      if new_width <= target_width do
+        {:cont, {acc <> grapheme, new_width}}
+      else
+        {:halt, {acc, width}}
+      end
+    end)
+    |> elem(0)
+  end
+
+  defp pad_to_width(str, target_width) do
+    current_width = display_width(str)
+    padding_needed = max(0, target_width - current_width)
+    str <> String.duplicate(" ", padding_needed)
+  end
+end
