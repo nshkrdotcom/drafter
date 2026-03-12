@@ -13,6 +13,13 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 - **Animation Support** - Smooth property animations with easing functions
 - **Zero Runtime Dependencies** - Pure Elixir implementation
 
+## Requirements
+
+- Elixir ~> 1.18
+- Erlang/OTP 28 or later
+
+Drafter relies on OTP 28's raw terminal mode (`-noshell` raw input), improved ANSI escape sequence handling, and lazy input reading. Earlier OTP versions will not handle keyboard input or screen updates correctly.
+
 ## Installation
 
 Add `drafter` to your `mix.exs`:

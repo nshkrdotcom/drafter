@@ -31,5 +31,6 @@ drafter-*.tar
 *.beam
 
 .aider*
+.tool-versions
 *.log*
 tui_debug.log
