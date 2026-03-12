@@ -650,11 +650,36 @@ defmodule Drafter do
 
       {:activate_widget, widget_id} ->
         if widget_hierarchy do
-          {new_hierarchy, _actions} =
+          {new_hierarchy, actions} =
             Drafter.WidgetHierarchy.send_event_to_widget(widget_hierarchy, widget_id, :activate)
 
-          {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, new_hierarchy)
-          app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
+          new_app_state =
+            Enum.reduce(actions, app_state, fn action, acc_state ->
+              case action do
+                {:app_callback, callback, data} ->
+                  case app_module.handle_event(callback, data, acc_state) do
+                    {:ok, new_state} -> new_state
+                    {:noreply, new_state} -> new_state
+                    {:show_modal, screen_module, props, opts} ->
+                      Drafter.ScreenManager.show_modal(screen_module, props, opts)
+                      acc_state
+                    {:show_toast, message, opts} ->
+                      Drafter.ScreenManager.show_toast(message, opts)
+                      acc_state
+                    {:push, screen_module, props, opts} ->
+                      Drafter.ScreenManager.push(screen_module, props, opts)
+                      acc_state
+                    {:pop, result} ->
+                      Drafter.ScreenManager.pop(result)
+                      acc_state
+                    _ -> acc_state
+                  end
+                _ -> acc_state
+              end
+            end)
+
+          {_, updated_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy)
+          app_event_loop(app_module, new_app_state, screen_rect, timers, updated_hierarchy)
         else
           app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
         end

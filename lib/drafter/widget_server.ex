@@ -127,7 +127,6 @@ defmodule Drafter.WidgetServer do
         {:reply, {:ok, new_widget_state}, %{state | state: new_widget_state}}
 
       {:ok, new_widget_state, actions} ->
-        handle_actions(state.id, actions)
         notify_render_needed(state.id)
         {:reply, {:ok, new_widget_state, actions}, %{state | state: new_widget_state}}
 
