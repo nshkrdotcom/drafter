@@ -70,9 +70,6 @@ defmodule ChatApp do
   def handle_event(_event, state), do: {:noreply, state}
 end
 
-require Logger
-Logger.configure(level: :warning)
-
 ip = System.get_env("CHAT_IP", "127.0.0.1")
 
 ip_tuple =
