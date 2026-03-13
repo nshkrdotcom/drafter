@@ -6,7 +6,7 @@ defmodule Drafter.MixProject do
 
     [
       app: :drafter,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -20,16 +20,59 @@ defmodule Drafter.MixProject do
         main: "Drafter",
         extras: ["README.md"],
         groups_for_modules: [
-          "Core": [Drafter, Drafter.App, Drafter.Widget, Drafter.Screen],
-          "Events": [Drafter.Event, Drafter.Event.Object, Drafter.Event.CustomRegistry, Drafter.Event.Delegation],
-          "Theming": [Drafter.Theme, Drafter.ThemeManager, Drafter.Color],
-          "Drawing": [Drafter.Draw.Segment, Drafter.Draw.Strip, Drafter.Draw.Canvas],
-          "Display Widgets": [Drafter.Widget.Label, Drafter.Widget.Markdown, Drafter.Widget.CodeView, Drafter.Widget.Digits, Drafter.Widget.ProgressBar, Drafter.Widget.LoadingIndicator, Drafter.Widget.Sparkline, Drafter.Widget.Pretty, Drafter.Widget.Log, Drafter.Widget.RichLog, Drafter.Widget.Rule, Drafter.Widget.Placeholder],
-          "Input Widgets": [Drafter.Widget.Button, Drafter.Widget.TextInput, Drafter.Widget.TextArea, Drafter.Widget.Checkbox, Drafter.Widget.Switch, Drafter.Widget.RadioSet, Drafter.Widget.SelectionList, Drafter.Widget.MaskedInput, Drafter.Widget.OptionList, Drafter.Widget.Link],
-          "Data Widgets": [Drafter.Widget.DataTable, Drafter.Widget.Tree, Drafter.Widget.DirectoryTree, Drafter.Widget.Chart],
-          "Layout Widgets": [Drafter.Widget.Container, Drafter.Widget.ScrollableContainer, Drafter.Widget.Grid, Drafter.Widget.Card, Drafter.Widget.Header, Drafter.Widget.Footer, Drafter.Widget.Collapsible, Drafter.Widget.TabbedContent],
-          "Testing": [Drafter.Test, Drafter.Test.Harness],
-          "Animation": [Drafter.Animation]
+          Core: [Drafter, Drafter.App, Drafter.Widget, Drafter.Screen],
+          Events: [
+            Drafter.Event,
+            Drafter.Event.Object,
+            Drafter.Event.CustomRegistry,
+            Drafter.Event.Delegation
+          ],
+          Theming: [Drafter.Theme, Drafter.ThemeManager, Drafter.Color],
+          Drawing: [Drafter.Draw.Segment, Drafter.Draw.Strip, Drafter.Draw.Canvas],
+          "Display Widgets": [
+            Drafter.Widget.Label,
+            Drafter.Widget.Markdown,
+            Drafter.Widget.CodeView,
+            Drafter.Widget.Digits,
+            Drafter.Widget.ProgressBar,
+            Drafter.Widget.LoadingIndicator,
+            Drafter.Widget.Sparkline,
+            Drafter.Widget.Pretty,
+            Drafter.Widget.Log,
+            Drafter.Widget.RichLog,
+            Drafter.Widget.Rule,
+            Drafter.Widget.Placeholder
+          ],
+          "Input Widgets": [
+            Drafter.Widget.Button,
+            Drafter.Widget.TextInput,
+            Drafter.Widget.TextArea,
+            Drafter.Widget.Checkbox,
+            Drafter.Widget.Switch,
+            Drafter.Widget.RadioSet,
+            Drafter.Widget.SelectionList,
+            Drafter.Widget.MaskedInput,
+            Drafter.Widget.OptionList,
+            Drafter.Widget.Link
+          ],
+          "Data Widgets": [
+            Drafter.Widget.DataTable,
+            Drafter.Widget.Tree,
+            Drafter.Widget.DirectoryTree,
+            Drafter.Widget.Chart
+          ],
+          "Layout Widgets": [
+            Drafter.Widget.Container,
+            Drafter.Widget.ScrollableContainer,
+            Drafter.Widget.Grid,
+            Drafter.Widget.Card,
+            Drafter.Widget.Header,
+            Drafter.Widget.Footer,
+            Drafter.Widget.Collapsible,
+            Drafter.Widget.TabbedContent
+          ],
+          Testing: [Drafter.Test, Drafter.Test.Harness],
+          Animation: [Drafter.Animation]
         ]
       ]
     ]
