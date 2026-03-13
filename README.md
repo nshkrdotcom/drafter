@@ -11,6 +11,7 @@ An Elixir Terminal User Interface framework inspired by Python's Textual. Build 
 - **Multi-Screen Navigation** - Push/pop screens, modals, toasts, panels
 - **Theming System** - Built-in themes with customization support
 - **Animation Support** - Smooth property animations with easing functions
+- **Remote TUI** - Serve apps over SSH or Telnet with isolated or shared sessions (see [Remote TUI](guides/remote_tui.md))
 - **Zero Runtime Dependencies** - Pure Elixir implementation
 
 ## Requirements
