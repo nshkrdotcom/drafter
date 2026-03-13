@@ -10,6 +10,7 @@ defmodule Drafter.Application do
       Drafter.Style.StylesheetLoader,
       Drafter.Animation,
       Drafter.Event.CustomRegistry,
+      Drafter.ActionRegistry,
       Drafter.EventHandler,
       Drafter.ScreenManager
     ]

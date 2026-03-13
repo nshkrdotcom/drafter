@@ -197,6 +197,16 @@ defmodule Drafter.WidgetHierarchy do
 
   @doc "Update widget with new props"
   @spec update_widget(t(), widget_id(), map()) :: t()
+  @spec update_widget_parent(t(), widget_id(), widget_id() | nil) :: t()
+  def update_widget_parent(hierarchy, widget_id, parent_id) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil -> hierarchy
+      widget_info ->
+        updated = %{widget_info | parent: parent_id}
+        %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated)}
+    end
+  end
+
   def update_widget(hierarchy, widget_id, new_props) do
     case Map.get(hierarchy.widgets, widget_id) do
       nil ->

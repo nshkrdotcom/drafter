@@ -260,6 +260,7 @@ defmodule Drafter.ComponentRenderer do
             }
 
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, updated_props)
           else
@@ -299,6 +300,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{classes: classes})
           else
@@ -746,6 +748,7 @@ defmodule Drafter.ComponentRenderer do
                 }
 
                 acc_hierarchy
+                |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
                 |> WidgetHierarchy.update_widget_rect(widget_id, rect)
                 |> WidgetHierarchy.update_widget(widget_id, updated_props)
               else
@@ -886,6 +889,7 @@ defmodule Drafter.ComponentRenderer do
           if Map.has_key?(hierarchy.widgets, widget_id) do
             # Widget exists - preserve its state but update rect and current theme index
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{options: theme_options})
           else
@@ -962,6 +966,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               options: mount_props.options,
@@ -1009,6 +1014,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               text: text,
@@ -1058,6 +1064,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               title: title,
@@ -1116,6 +1123,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               title: title,
@@ -1157,6 +1165,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{text: text, size: size})
           else
@@ -1186,6 +1195,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{content: content})
           else
@@ -1214,6 +1224,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{text: text, style: merged_style})
           else
@@ -1242,6 +1253,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{text: text})
           else
@@ -1268,6 +1280,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{text: content, style: merged_style})
           else
@@ -1312,6 +1325,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               on_change: mount_props.on_change,
@@ -1361,6 +1375,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               on_change: mount_props.on_change,
@@ -1464,6 +1479,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               tabs: tabs,
@@ -1499,6 +1515,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{title: title, app_module: app_module})
           else
@@ -1529,6 +1546,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               bindings: bindings,
@@ -1568,6 +1586,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{_render_timestamp: timestamp})
           else
@@ -1598,6 +1617,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               text: text,
@@ -1634,6 +1654,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               file_path: Keyword.get(opts, :file_path),
@@ -1671,6 +1692,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
           else
             WidgetHierarchy.add_widget(
@@ -1700,6 +1722,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{data: data, app_module: app_module})
           else
@@ -1789,6 +1812,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               data: data,
@@ -1840,6 +1864,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               data: data,
@@ -1913,6 +1938,7 @@ defmodule Drafter.ComponentRenderer do
               end
 
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, update_props)
           else
@@ -1949,6 +1975,7 @@ defmodule Drafter.ComponentRenderer do
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               source: source,

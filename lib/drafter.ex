@@ -387,31 +387,10 @@ defmodule Drafter do
                   end
 
                 new_app_state =
-                  Enum.reduce(actions, app_state, fn action, acc_state ->
-                    case action do
-                      {:app_callback, callback, data} ->
-                        case app_module.handle_event(callback, data, acc_state) do
-                          {:ok, new_state} -> new_state
-                          {:noreply, new_state} -> new_state
-                          {:show_modal, screen_module, props, opts} ->
-                            Drafter.ScreenManager.show_modal(screen_module, props, opts)
-                            acc_state
-                          {:show_toast, message, opts} ->
-                            Drafter.ScreenManager.show_toast(message, opts)
-                            acc_state
-                          {:push, screen_module, props, opts} ->
-                            Drafter.ScreenManager.push(screen_module, props, opts)
-                            acc_state
-                          {:pop, result} ->
-                            Drafter.ScreenManager.pop(result)
-                            acc_state
-                          {:replace, screen_module, props, opts} ->
-                            Drafter.ScreenManager.replace(screen_module, props, opts)
-                            acc_state
-                          _ -> acc_state
-                        end
-                      _ -> acc_state
-                    end
+                  Enum.reduce(actions, app_state, fn
+                    {:app_callback, callback, data}, acc_state ->
+                      dispatch_app_callback(app_module, callback, data, acc_state)
+                    _, acc_state -> acc_state
                   end)
 
                 {_, final_hierarchy} =
@@ -483,35 +462,10 @@ defmodule Drafter do
                       end
 
                     new_app_state =
-                      Enum.reduce(actions, app_state, fn action, acc_state ->
-                        case action do
-                          {:app_callback, callback, data} ->
-                            result = app_module.handle_event(callback, data, acc_state)
-
-                            case result do
-                              {:ok, new_state} -> new_state
-                              {:stop, _reason} -> acc_state
-                              {:pop, result} ->
-                                Drafter.ScreenManager.pop(result)
-                                acc_state
-                              {:push, screen_module, props, opts} ->
-                                Drafter.ScreenManager.push(screen_module, props, opts)
-                                acc_state
-                              {:show_modal, screen_module, props, opts} ->
-                                Drafter.ScreenManager.show_modal(screen_module, props, opts)
-                                acc_state
-                              {:show_toast, message, opts} ->
-                                Drafter.ScreenManager.show_toast(message, opts)
-                                acc_state
-                              {:replace, screen_module, props, opts} ->
-                                Drafter.ScreenManager.replace(screen_module, props, opts)
-                                acc_state
-                              {:noreply, new_state} -> new_state
-                              _other -> acc_state
-                            end
-
-                          _ -> acc_state
-                        end
+                      Enum.reduce(actions, app_state, fn
+                        {:app_callback, callback, data}, acc_state ->
+                          dispatch_app_callback(app_module, callback, data, acc_state)
+                        _, acc_state -> acc_state
                       end)
 
                     if needs_rerender or widget_handled do
@@ -528,39 +482,17 @@ defmodule Drafter do
         end
 
       {:app_event, event_name, data} ->
-        case app_module.handle_event(event_name, data, app_state) do
-          {:ok, new_app_state} ->
-            {_, new_hierarchy} =
-              render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+        result = app_module.handle_event(event_name, data, app_state)
 
-            app_event_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy)
-
-          {:noreply, new_app_state} ->
-            app_event_loop(app_module, new_app_state, screen_rect, timers, widget_hierarchy)
-
+        case result do
           {:stop, reason} ->
             cleanup_timers(timers)
             if reason == :normal, do: :ok, else: {:error, reason}
 
-          {:show_modal, screen_module, props, opts} ->
-            Drafter.ScreenManager.show_modal(screen_module, props, opts)
-            app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
-
-          {:show_toast, message, opts} ->
-            Drafter.ScreenManager.show_toast(message, opts)
-            app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
-
-          {:push, screen_module, props, opts} ->
-            Drafter.ScreenManager.push(screen_module, props, opts)
-            app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
-
-          {:replace, screen_module, props, opts} ->
-            Drafter.ScreenManager.replace(screen_module, props, opts)
-            app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
-
-          {:pop, result} ->
-            Drafter.ScreenManager.pop(result)
-            app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+          _ ->
+            new_app_state = dispatch_app_callback_result(result, app_state)
+            {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+            app_event_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy)
         end
 
       {:bound_state_update, key, value} ->
@@ -641,12 +573,7 @@ defmodule Drafter do
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
 
       {:widget_action, _widget_id, {:app_callback, callback, data}} ->
-        new_app_state =
-          case app_module.handle_event(callback, data, app_state) do
-            {:ok, new_state} -> new_state
-            {:noreply, new_state} -> new_state
-            _ -> app_state
-          end
+        new_app_state = dispatch_app_callback(app_module, callback, data, app_state)
 
         {_, updated_hierarchy} =
           render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
@@ -669,28 +596,10 @@ defmodule Drafter do
             Drafter.WidgetHierarchy.send_event_to_widget(widget_hierarchy, widget_id, :activate)
 
           new_app_state =
-            Enum.reduce(actions, app_state, fn action, acc_state ->
-              case action do
-                {:app_callback, callback, data} ->
-                  case app_module.handle_event(callback, data, acc_state) do
-                    {:ok, new_state} -> new_state
-                    {:noreply, new_state} -> new_state
-                    {:show_modal, screen_module, props, opts} ->
-                      Drafter.ScreenManager.show_modal(screen_module, props, opts)
-                      acc_state
-                    {:show_toast, message, opts} ->
-                      Drafter.ScreenManager.show_toast(message, opts)
-                      acc_state
-                    {:push, screen_module, props, opts} ->
-                      Drafter.ScreenManager.push(screen_module, props, opts)
-                      acc_state
-                    {:pop, result} ->
-                      Drafter.ScreenManager.pop(result)
-                      acc_state
-                    _ -> acc_state
-                  end
-                _ -> acc_state
-              end
+            Enum.reduce(actions, app_state, fn
+              {:app_callback, callback, data}, acc_state ->
+                dispatch_app_callback(app_module, callback, data, acc_state)
+              _, acc_state -> acc_state
             end)
 
           {_, updated_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy)
@@ -818,6 +727,15 @@ defmodule Drafter do
       _other ->
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
     end
+  end
+
+  defp dispatch_app_callback(app_module, callback, data, acc_state) do
+    result = app_module.handle_event(callback, data, acc_state)
+    dispatch_app_callback_result(result, acc_state)
+  end
+
+  defp dispatch_app_callback_result(result, acc_state) do
+    Drafter.ActionRegistry.dispatch(result, acc_state)
   end
 
   defp extract_widget_value(state) do
