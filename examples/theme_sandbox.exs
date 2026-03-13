@@ -5,7 +5,11 @@ defmodule ThemeSandbox do
   import Drafter.App
 
   def mount(_props) do
+    theme_names = Drafter.Theme.available_themes() |> Map.keys() |> Enum.map(&to_string/1)
+
     %{
+      theme_names: theme_names,
+      current_theme: "textual-dark",
       progress: 65.0,
       sparkline_data: Enum.map(1..20, fn _ -> :rand.uniform(10) end),
       current_time: current_time(),
@@ -69,7 +73,14 @@ defmodule ThemeSandbox do
       header("Theme Sandbox", show_clock: true),
       horizontal(
         [
-          vertical([theme_selector()], width: 22),
+          vertical([
+        option_list(
+          Enum.map(state.theme_names, fn name -> {name, name} end),
+          on_select: :theme_selected,
+          on_highlight: :theme_highlighted,
+          selected: state.current_theme
+        )
+      ], width: 22),
           scrollable(
             [
               label("Buttons:", style: %{bold: true}),
@@ -178,6 +189,16 @@ defmodule ThemeSandbox do
       ),
       footer()
     ])
+  end
+
+  def handle_event(:theme_selected,   name, state) do
+    Drafter.ThemeManager.set_theme(name)
+    {:ok, %{state | current_theme: name}}
+  end
+
+  def handle_event(:theme_highlighted, name, state) do
+    Drafter.ThemeManager.set_theme(name)
+    {:ok, %{state | current_theme: name}}
   end
 
   def handle_event(:food_selected,  food,  _state), do: {:show_toast, "Food: #{food}",  [variant: :info]}
