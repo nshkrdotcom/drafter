@@ -3,26 +3,33 @@ defmodule Drafter.EventHandler do
 
   defstruct [:handlers, :monitors]
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    gen_opts = if name, do: [name: name], else: []
+    GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @spec register_handler(term(), function(), pid(), keyword()) :: {:ok, pid()} | {:error, term()}
   def register_handler(event_pattern, handler_fn, owner_pid, opts \\ []) do
     passthrough = Keyword.get(opts, :passthrough, false)
     level = Keyword.get(opts, :level, :top)
-    GenServer.call(__MODULE__, {:register, event_pattern, handler_fn, owner_pid, passthrough, level})
+    GenServer.call(resolve(), {:register, event_pattern, handler_fn, owner_pid, passthrough, level})
   end
 
+  @spec unregister_handler(pid(), term()) :: :ok
   def unregister_handler(owner_pid, event_pattern \\ nil) do
-    GenServer.call(__MODULE__, {:unregister, owner_pid, event_pattern})
+    GenServer.call(resolve(), {:unregister, owner_pid, event_pattern})
   end
 
+  @spec dispatch_event(term()) :: :ok
   def dispatch_event(event) do
-    GenServer.cast(__MODULE__, {:dispatch, event})
+    GenServer.cast(resolve(), {:dispatch, event})
   end
 
+  @spec dispatch_event_sync(term()) :: :handled | :passthrough
   def dispatch_event_sync(event) do
-    GenServer.call(__MODULE__, {:dispatch, event})
+    GenServer.call(resolve(), {:dispatch, event})
   end
 
   @impl true
@@ -94,10 +101,11 @@ defmodule Drafter.EventHandler do
   end
 
   def handle_call({:unregister, owner_pid, nil}, _from, state) do
-    new_handlers = Enum.map(state.handlers, fn level ->
-      Enum.reject(level, &(&1.owner_pid == owner_pid))
-    end)
-    |> Enum.reject(&(&1 == []))
+    new_handlers =
+      Enum.map(state.handlers, fn level ->
+        Enum.reject(level, &(&1.owner_pid == owner_pid))
+      end)
+      |> Enum.reject(&(&1 == []))
 
     case Map.get(state.monitors, owner_pid) do
       nil ->
@@ -111,16 +119,17 @@ defmodule Drafter.EventHandler do
   end
 
   def handle_call({:unregister, owner_pid, event_pattern}, _from, state) do
-    new_handlers = Enum.map(state.handlers, fn level ->
-      Enum.reject(level, fn h ->
-        h.owner_pid == owner_pid and match_event_pattern?(event_pattern, h.event_pattern)
+    new_handlers =
+      Enum.map(state.handlers, fn level ->
+        Enum.reject(level, fn h ->
+          h.owner_pid == owner_pid and match_event_pattern?(event_pattern, h.event_pattern)
+        end)
       end)
-    end)
-    |> Enum.reject(&(&1 == []))
+      |> Enum.reject(&(&1 == []))
 
     if Enum.any?(state.handlers, fn level ->
-      Enum.any?(level, &(&1.owner_pid == owner_pid))
-    end) do
+         Enum.any?(level, &(&1.owner_pid == owner_pid))
+       end) do
       {:reply, :ok, %{state | handlers: new_handlers}}
     else
       case Map.get(state.monitors, owner_pid) do
@@ -158,10 +167,11 @@ defmodule Drafter.EventHandler do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    new_handlers = Enum.map(state.handlers, fn level ->
-      Enum.reject(level, &(&1.owner_pid == pid))
-    end)
-    |> Enum.reject(&(&1 == []))
+    new_handlers =
+      Enum.map(state.handlers, fn level ->
+        Enum.reject(level, &(&1.owner_pid == pid))
+      end)
+      |> Enum.reject(&(&1 == []))
 
     new_monitors = Map.delete(state.monitors, pid)
 
@@ -172,6 +182,8 @@ defmodule Drafter.EventHandler do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  defp resolve(), do: Process.get(:drafter_event_handler, __MODULE__)
 
   defp insert_after(handlers, target_pid, new_level) do
     Enum.flat_map(handlers, fn level ->
@@ -193,26 +205,22 @@ defmodule Drafter.EventHandler do
   end
 
   defp dispatch_to_handlers(handlers, event) do
-
-    result = Enum.reduce_while(handlers, :passthrough, fn level, _acc ->
+    Enum.reduce_while(handlers, :passthrough, fn level, _acc ->
       matched_handlers = Enum.filter(level, fn handler ->
         matches_event?(handler.event_pattern, event)
       end)
 
-
-      level_results = Enum.map(matched_handlers, fn handler ->
-        try do
-          result = handler.handler_fn.(event)
-          result
-        rescue
-          e ->
-            {:error, e}
-        end
-      end)
+      level_results =
+        Enum.map(matched_handlers, fn handler ->
+          try do
+            handler.handler_fn.(event)
+          rescue
+            e -> {:error, e}
+          end
+        end)
 
       has_passthrough = Enum.any?(matched_handlers, & &1.passthrough)
       has_non_passthrough = Enum.any?(matched_handlers, fn h -> not h.passthrough end)
-
 
       cond do
         has_non_passthrough and :handled in level_results ->
@@ -228,8 +236,6 @@ defmodule Drafter.EventHandler do
           {:cont, :passthrough}
       end
     end)
-
-    result
   end
 
   defp matches_event?(pattern, event) do

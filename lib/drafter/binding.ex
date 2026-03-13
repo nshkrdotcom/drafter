@@ -1,13 +1,13 @@
 defmodule Drafter.Binding do
   @moduledoc false
 
-  defp send_app_callback(callback_name, data) do
+  defp send_app_callback(session_pid, callback_name, data) do
     case Drafter.ScreenManager.get_active_screen() do
       nil ->
-        send(:tui_app_loop, {:app_event, callback_name, data})
+        send(session_pid, {:app_event, callback_name, data})
 
       _screen ->
-        send(:tui_app_loop, {:tui_event, {:app_callback, callback_name, data}})
+        send(session_pid, {:tui_event, {:app_callback, callback_name, data}})
     end
   end
 
@@ -19,21 +19,23 @@ defmodule Drafter.Binding do
   end
 
   def create_bound_callback(opts, _value_key) do
+    session_pid = self()
+
     case Keyword.get(opts, :bind) do
       nil ->
         case Keyword.get(opts, :on_change) do
           nil -> nil
-          callback -> fn value -> send_app_callback(callback, value) end
+          callback -> fn value -> send_app_callback(session_pid, callback, value) end
         end
 
       bind_key when is_atom(bind_key) ->
         on_change = Keyword.get(opts, :on_change)
 
         fn value ->
-          send(:tui_app_loop, {:bound_state_update, bind_key, value})
+          send(session_pid, {:bound_state_update, bind_key, value})
 
           if on_change do
-            send_app_callback(on_change, value)
+            send_app_callback(session_pid, on_change, value)
           end
         end
     end

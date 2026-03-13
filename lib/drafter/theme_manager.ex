@@ -18,33 +18,39 @@ defmodule Drafter.ThemeManager do
     app_pid: nil
   ]
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    gen_opts = if name, do: [name: name], else: []
+    GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
+  @spec get_current_theme() :: Drafter.Theme.t()
   def get_current_theme() do
-    GenServer.call(__MODULE__, :get_current_theme)
+    GenServer.call(resolve(), :get_current_theme)
   end
 
+  @spec set_theme(String.t()) :: :ok
   def set_theme(theme_name) do
-    GenServer.cast(__MODULE__, {:set_theme, theme_name})
+    GenServer.cast(resolve(), {:set_theme, theme_name})
   end
 
+  @spec register_app(pid()) :: :ok
   def register_app(app_pid) do
-    GenServer.cast(__MODULE__, {:register_app, app_pid})
+    GenServer.cast(resolve(), {:register_app, app_pid})
   end
 
   @impl GenServer
   def init(_opts) do
     available_themes = Theme.available_themes()
-    current_theme = Theme.dark_theme()  # Default theme
-    
+    current_theme = Theme.dark_theme()
+
     state = %__MODULE__{
       current_theme: current_theme,
       available_themes: available_themes,
       app_pid: nil
     }
-    
+
     {:ok, state}
   end
 
@@ -58,15 +64,14 @@ defmodule Drafter.ThemeManager do
     case Theme.get_theme(theme_name) do
       nil ->
         {:noreply, state}
-      
+
       new_theme ->
         new_state = %{state | current_theme: new_theme}
-        
-        # Notify app that theme changed (triggers re-render)
+
         if state.app_pid do
           send(state.app_pid, {:theme_updated, new_theme})
         end
-        
+
         {:noreply, new_state}
     end
   end
@@ -74,4 +79,6 @@ defmodule Drafter.ThemeManager do
   def handle_cast({:register_app, app_pid}, state) do
     {:noreply, %{state | app_pid: app_pid}}
   end
+
+  defp resolve(), do: Process.get(:drafter_theme_manager, __MODULE__)
 end

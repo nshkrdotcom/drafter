@@ -87,7 +87,7 @@ defmodule Drafter.Style.StylesheetLoader do
     stylesheet =
       cond do
         function_exported?(app_module, :__css_path__, 0) ->
-          css_path = app_module.__css_path__
+          css_path = app_module.__css_path__()
 
           file_stylesheet =
             if css_path do
@@ -107,7 +107,7 @@ defmodule Drafter.Style.StylesheetLoader do
 
           inline_styles =
             if function_exported?(app_module, :__inline_styles__, 0) do
-              app_module.__inline_styles__
+              app_module.__inline_styles__()
             else
               %{}
             end
@@ -117,7 +117,7 @@ defmodule Drafter.Style.StylesheetLoader do
           |> then(&merge_inline(&1, inline_styles))
 
         function_exported?(app_module, :__inline_styles__, 0) ->
-          inline_styles = app_module.__inline_styles__
+          inline_styles = app_module.__inline_styles__()
           merge_inline(base, inline_styles)
 
         true ->

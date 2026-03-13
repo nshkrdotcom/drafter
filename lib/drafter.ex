@@ -136,6 +136,12 @@ defmodule Drafter do
     :ok
   end
 
+  @spec focus(term()) :: :ok
+  def focus(widget_id) do
+    send(self(), {:focus_widget, widget_id})
+    :ok
+  end
+
   @doc """
   Get the current value of a widget by its ID.
 
@@ -287,6 +293,231 @@ defmodule Drafter do
   def stop_all_animations(widget_id) do
     Drafter.Animation.stop_all(widget_id)
   end
+
+  @doc """
+  Run an app module in an isolated or shared session using pre-started session services.
+
+  `session_ctx` must contain: `event_manager`, `compositor`, `screen_manager`,
+  `theme_manager`, `event_handler` as pid values.
+
+  Options:
+    - `:mode` - `:isolated` (default) or `:shared`
+    - `:shared_state` - pid of SharedState server when mode is `:shared`
+    - All other opts are passed as mount props to the app module
+  """
+  @spec run_session(module(), map(), keyword()) :: :ok | {:error, term()}
+  def run_session(app_module, session_ctx, opts \\ []) do
+    Process.put(:drafter_event_manager, session_ctx.event_manager)
+    Process.put(:drafter_compositor, session_ctx.compositor)
+    Process.put(:drafter_screen_manager, session_ctx.screen_manager)
+    Process.put(:drafter_theme_manager, session_ctx.theme_manager)
+    Process.put(:drafter_event_handler, session_ctx.event_handler)
+
+    Drafter.Event.Manager.subscribe_to(session_ctx.event_manager, self(), :all)
+    Drafter.ThemeManager.register_app(self())
+    Drafter.ScreenManager.register_app(self())
+
+    {mode, opts} = Keyword.pop(opts, :mode, :isolated)
+    {shared_state, opts} = Keyword.pop(opts, :shared_state)
+
+    mount_props = Map.new(opts)
+
+    case mode do
+      :shared -> run_shared_session(app_module, mount_props, shared_state)
+      _ -> run_isolated_session(app_module, mount_props)
+    end
+  end
+
+  defp run_isolated_session(app_module, mount_props) do
+    _ = Drafter.Logging.setup()
+
+    app_state = app_module.mount(mount_props)
+
+    {width, height} = Compositor.get_screen_size()
+    screen_rect = %{x: 0, y: 0, width: width, height: height}
+
+    {_, hierarchy} = render_app(app_module, app_state, screen_rect)
+
+    ready_app_state = app_module.on_ready(app_state)
+    {_, hierarchy} = render_app(app_module, ready_app_state, screen_rect, hierarchy)
+
+    app_event_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy)
+  end
+
+  defp run_shared_session(app_module, mount_props, shared_state_pid) do
+    _ = Drafter.Logging.setup()
+
+    topic = Drafter.Session.SharedState.pubsub_topic(shared_state_pid)
+    Phoenix.PubSub.subscribe(Drafter.PubSub, topic)
+
+    app_state = Drafter.Session.SharedState.get_state(shared_state_pid)
+    app_state = Map.merge(app_state, mount_props)
+
+    {width, height} = Compositor.get_screen_size()
+    screen_rect = %{x: 0, y: 0, width: width, height: height}
+
+    {_, hierarchy} = render_app(app_module, app_state, screen_rect)
+
+    ready_app_state =
+      if function_exported?(app_module, :on_ready, 1) do
+        app_module.on_ready(app_state)
+      else
+        app_state
+      end
+
+    shared_session_loop(app_module, ready_app_state, screen_rect, %{}, hierarchy, shared_state_pid, mount_props, %{})
+  end
+
+  defp shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings) do
+    receive do
+      {:tui_event, {:resize, {width, height}}} ->
+        new_screen_rect = %{x: 0, y: 0, width: width, height: height}
+        {_, new_hierarchy} = render_app(app_module, app_state, new_screen_rect, widget_hierarchy)
+        shared_session_loop(app_module, app_state, new_screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
+
+      {:tui_event, event} ->
+        case check_global_quit(event) do
+          :quit ->
+            cleanup_timers(timers)
+            :ok
+
+          :continue ->
+            {new_hierarchy, actions, widget_consumed} =
+              if widget_hierarchy && widget_hierarchy.focused_widget do
+                Drafter.WidgetHierarchy.handle_event_consumed(widget_hierarchy, event)
+              else
+                {widget_hierarchy, [], false}
+              end
+
+            updated_hierarchy =
+              if Enum.member?(actions, :widget_layout_needed) do
+                update_hierarchy_preferred_sizes(new_hierarchy)
+              else
+                new_hierarchy
+              end
+
+            {flushed_state, flushed_bindings} = drain_bound_updates(app_state, local_bindings)
+
+            {new_app_state, new_bindings, new_hierarchy_after_callbacks} =
+              Enum.reduce(actions, {flushed_state, flushed_bindings, updated_hierarchy}, fn
+                {:app_callback, callback, data}, {acc_state, acc_bindings, acc_hier} ->
+                  {result_state, result_hier} =
+                    dispatch_shared_callback(app_module, callback, data, acc_state, shared_state_pid, acc_hier, screen_rect)
+                  {result_state, acc_bindings, result_hier}
+
+                _, acc ->
+                  acc
+              end)
+
+            if widget_consumed do
+              {_, final_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy_after_callbacks)
+              shared_session_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy, shared_state_pid, mount_props, new_bindings)
+            else
+              {result_state, should_stop} = handle_shared_event(app_module, event, new_app_state, shared_state_pid)
+
+              if should_stop do
+                cleanup_timers(timers)
+                :ok
+              else
+                {nav_hierarchy, _nav_actions} = Drafter.WidgetHierarchy.handle_event(updated_hierarchy, event)
+                {_, final_hierarchy} = render_app(app_module, result_state, screen_rect, nav_hierarchy)
+                shared_session_loop(app_module, result_state, screen_rect, timers, final_hierarchy, shared_state_pid, mount_props, new_bindings)
+              end
+            end
+        end
+
+      {:bound_state_update, key, value} ->
+        new_bindings = Map.put(local_bindings, key, value)
+        new_app_state = Map.put(app_state, key, value)
+        {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+        shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, new_bindings)
+
+      {:app_event, callback, data} ->
+        {new_state, new_hier} =
+          dispatch_shared_callback(app_module, callback, data, app_state, shared_state_pid, widget_hierarchy, screen_rect)
+        {_, final_hier} = render_app(app_module, new_state, screen_rect, new_hier)
+        shared_session_loop(app_module, new_state, screen_rect, timers, final_hier, shared_state_pid, mount_props, local_bindings)
+
+      {:shared_state_updated, new_state} ->
+        merged_state = Map.merge(new_state, mount_props)
+        {_, new_hierarchy} = render_app(app_module, merged_state, screen_rect, widget_hierarchy)
+        shared_session_loop(app_module, merged_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, %{})
+
+      {:focus_widget, widget_id} ->
+        new_hierarchy =
+          if widget_hierarchy do
+            Drafter.WidgetHierarchy.focus_widget(widget_hierarchy, widget_id)
+          else
+            widget_hierarchy
+          end
+
+        {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, new_hierarchy)
+        shared_session_loop(app_module, app_state, screen_rect, timers, updated_hierarchy, shared_state_pid, mount_props, local_bindings)
+
+      {:set_interval, interval_ms, timer_id} ->
+        timer_ref = :timer.send_interval(interval_ms, {:timer, timer_id})
+        new_timers = Map.put(timers, timer_id, timer_ref)
+        shared_session_loop(app_module, app_state, screen_rect, new_timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+
+      {:set_timeout, timeout_ms, timer_id} ->
+        Process.send_after(self(), {:timer, timer_id}, timeout_ms)
+        shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+
+      {:timer, timer_id} ->
+        new_app_state =
+          if function_exported?(app_module, :on_timer, 2) do
+            app_module.on_timer(timer_id, app_state)
+          else
+            app_state
+          end
+
+        {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+        shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
+
+      _other ->
+        shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+    end
+  end
+
+  defp handle_shared_event(app_module, event, app_state, shared_state_pid) do
+    result =
+      if function_exported?(app_module, :handle_event, 2) do
+        app_module.handle_event(event, app_state)
+      else
+        {:noreply, app_state}
+      end
+
+    case result do
+      {:ok, new_state} ->
+        Drafter.Session.SharedState.update_state(shared_state_pid, new_state)
+        {new_state, false}
+
+      {:stop, _reason} ->
+        {app_state, true}
+
+      _ ->
+        {app_state, false}
+    end
+  end
+
+  defp dispatch_shared_callback(app_module, callback, data, app_state, shared_state_pid, hierarchy, _screen_rect) do
+    result =
+      if function_exported?(app_module, :handle_event, 3) do
+        app_module.handle_event(callback, data, app_state)
+      else
+        {:noreply, app_state}
+      end
+
+    case result do
+      {:ok, new_state} ->
+        Drafter.Session.SharedState.update_state(shared_state_pid, new_state)
+        {new_state, hierarchy}
+
+      _ ->
+        {app_state, hierarchy}
+    end
+  end
+
 
   defp maybe_start_tree_sitter(opts) do
     if Keyword.get(opts, :syntax_highlighting, false) do
@@ -529,6 +760,17 @@ defmodule Drafter do
       {:set_timeout, timeout_ms, timer_id} ->
         Process.send_after(self(), {:timer, timer_id}, timeout_ms)
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+
+      {:focus_widget, widget_id} ->
+        new_hierarchy =
+          if widget_hierarchy do
+            Drafter.WidgetHierarchy.focus_widget(widget_hierarchy, widget_id)
+          else
+            widget_hierarchy
+          end
+
+        {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, new_hierarchy)
+        app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
 
       {:widget_event, event} ->
         if widget_hierarchy do
@@ -813,6 +1055,15 @@ defmodule Drafter do
 
       _ ->
         state
+    end
+  end
+
+  defp drain_bound_updates(app_state, bindings) do
+    receive do
+      {:bound_state_update, key, value} ->
+        drain_bound_updates(Map.put(app_state, key, value), Map.put(bindings, key, value))
+    after
+      0 -> {app_state, bindings}
     end
   end
 

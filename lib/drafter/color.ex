@@ -86,6 +86,28 @@ defmodule Drafter.Color do
     {r, g, b}
   end
 
+  def normalize(name) when is_atom(name) do
+    case name do
+      :black -> {0, 0, 0}
+      :red -> {205, 49, 49}
+      :green -> {13, 188, 121}
+      :yellow -> {229, 229, 16}
+      :blue -> {36, 114, 200}
+      :magenta -> {188, 63, 188}
+      :cyan -> {17, 168, 205}
+      :white -> {229, 229, 229}
+      :bright_black -> {102, 102, 102}
+      :bright_red -> {241, 76, 76}
+      :bright_green -> {35, 209, 139}
+      :bright_yellow -> {245, 245, 67}
+      :bright_blue -> {59, 142, 234}
+      :bright_magenta -> {214, 112, 214}
+      :bright_cyan -> {41, 184, 219}
+      :bright_white -> {255, 255, 255}
+      _ -> {255, 255, 255}
+    end
+  end
+
   def normalize(_), do: {255, 255, 255}
 
   defp parse_hex("#" <> hex) do

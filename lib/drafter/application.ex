@@ -12,7 +12,10 @@ defmodule Drafter.Application do
       Drafter.Event.CustomRegistry,
       Drafter.ActionRegistry,
       Drafter.EventHandler,
-      Drafter.ScreenManager
+      Drafter.ScreenManager,
+      Drafter.ThemeManager,
+      {Registry, keys: :unique, name: Drafter.Session.Registry},
+      Drafter.Session
     ]
 
     opts = [strategy: :one_for_one, name: Drafter.Supervisor]

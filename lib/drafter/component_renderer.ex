@@ -379,6 +379,18 @@ defmodule Drafter.ComponentRenderer do
                 updated_props
               end
 
+            updated_props =
+              if existing_state.text != value do
+                updated_props
+                |> Map.put(:text, value)
+                |> Map.put(:cursor_position, 0)
+                |> Map.put(:scroll_offset, 0)
+                |> Map.put(:selection_start, nil)
+                |> Map.put(:selection_end, nil)
+              else
+                updated_props
+              end
+
             hierarchy = WidgetHierarchy.update_widget_rect(hierarchy, widget_id, rect)
 
             if map_size(updated_props) > 0 do

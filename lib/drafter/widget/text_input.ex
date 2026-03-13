@@ -478,9 +478,12 @@ defmodule Drafter.Widget.TextInput do
 
   @impl Drafter.Widget
   def update(props, state) do
+    new_text = Map.get(props, :text, state.text)
+    text_changed = new_text != state.text
+
     %{
       state
-      | text: Map.get(props, :text, state.text),
+      | text: new_text,
         placeholder: Map.get(props, :placeholder, state.placeholder),
         focused: Map.get(props, :focused, state.focused),
         style: Map.get(props, :style, state.style),
@@ -489,8 +492,10 @@ defmodule Drafter.Widget.TextInput do
         on_submit: Map.get(props, :on_submit, state.on_submit),
         max_length: Map.get(props, :max_length, state.max_length),
         width: Map.get(props, :width, state.width),
-        selection_start: Map.get(props, :selection_start, state.selection_start),
-        selection_end: Map.get(props, :selection_end, state.selection_end),
+        cursor_position: Map.get(props, :cursor_position, if(text_changed, do: 0, else: state.cursor_position)),
+        scroll_offset: Map.get(props, :scroll_offset, if(text_changed, do: 0, else: state.scroll_offset)),
+        selection_start: Map.get(props, :selection_start, if(text_changed, do: nil, else: state.selection_start)),
+        selection_end: Map.get(props, :selection_end, if(text_changed, do: nil, else: state.selection_end)),
         app_module: Map.get(props, :app_module, state.app_module),
         validators: Map.get(props, :validators, state.validators),
         error: Map.get(props, :error, state.error),

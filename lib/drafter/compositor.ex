@@ -23,34 +23,31 @@ defmodule Drafter.Compositor do
           height: pos_integer()
         }
 
-  @doc "Start the compositor"
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    gen_opts = if name, do: [name: name], else: []
+    GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
-  @doc "Render strips to screen buffer"
   @spec render_strips([Strip.t()], non_neg_integer(), non_neg_integer()) :: :ok
   def render_strips(strips, x \\ 0, y \\ 0) do
-    GenServer.cast(__MODULE__, {:render_strips, strips, x, y})
+    GenServer.cast(resolve(), {:render_strips, strips, x, y})
   end
 
-  @doc "Clear the screen"
   @spec clear_screen() :: :ok
   def clear_screen() do
-    GenServer.cast(__MODULE__, :clear_screen)
+    GenServer.cast(resolve(), :clear_screen)
   end
 
-  @doc "Force a complete screen refresh"
   @spec refresh() :: :ok
   def refresh() do
-    GenServer.cast(__MODULE__, :refresh)
+    GenServer.cast(resolve(), :refresh)
   end
 
-  @doc "Get current screen size"
   @spec get_screen_size() :: {pos_integer(), pos_integer()}
   def get_screen_size() do
-    GenServer.call(__MODULE__, :get_screen_size)
+    GenServer.call(resolve(), :get_screen_size)
   end
 
   @impl GenServer
@@ -58,24 +55,22 @@ defmodule Drafter.Compositor do
     terminal_driver = Keyword.get(opts, :terminal_driver, Terminal.Driver)
     event_manager = Keyword.get(opts, :event_manager, Event.Manager)
 
-    Event.Manager.subscribe(self(), &resize_event?/1)
+    Event.Manager.subscribe_to(event_manager, self(), &resize_event?/1)
+
+    {width, height} = driver_get_size(terminal_driver)
+
+    empty_buffer = create_empty_buffer(width, height)
 
     state = %__MODULE__{
       terminal_driver: terminal_driver,
       event_manager: event_manager,
-      screen_buffer: [],
+      screen_buffer: empty_buffer,
       dirty_regions: [],
-      screen_size: {80, 24},
+      screen_size: {width, height},
       rendering: false
     }
 
-    {width, height} = terminal_driver.get_size()
-    initial_state = %{state | screen_size: {width, height}}
-
-    empty_buffer = create_empty_buffer(width, height)
-    final_state = %{initial_state | screen_buffer: empty_buffer}
-
-    {:ok, final_state}
+    {:ok, state}
   end
 
   @impl GenServer
@@ -132,6 +127,14 @@ defmodule Drafter.Compositor do
 
   defp resize_event?({:resize, _}), do: true
   defp resize_event?(_), do: false
+
+  defp resolve(), do: Process.get(:drafter_compositor, __MODULE__)
+
+  defp driver_write(driver, data) when is_atom(driver), do: driver.write(data)
+  defp driver_write({mod, pid}, data), do: mod.write(pid, data)
+
+  defp driver_get_size(driver) when is_atom(driver), do: driver.get_size()
+  defp driver_get_size({mod, pid}), do: mod.get_size(pid)
 
   defp create_empty_buffer(width, height) do
     empty_strip = Strip.from_text(String.duplicate(" ", width))
@@ -204,8 +207,7 @@ defmodule Drafter.Compositor do
 
   defp render_to_terminal(state) do
     output = build_terminal_output(state.screen_buffer, state.dirty_regions)
-
-    state.terminal_driver.write(output)
+    driver_write(state.terminal_driver, output)
   end
 
   defp build_terminal_output(screen_buffer, _dirty_regions) do
