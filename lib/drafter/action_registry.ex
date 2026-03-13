@@ -1,5 +1,25 @@
 defmodule Drafter.ActionRegistry do
-  @moduledoc false
+  @moduledoc """
+  Global registry for `Drafter.ActionHandler` modules.
+
+  Handlers are checked in reverse-registration order (last registered = highest priority).
+  The built-in handler is always present and handles the standard return values
+  (`{:ok, state}`, `{:noreply, state}`, `{:show_modal, ...}`, `{:show_toast, ...}`,
+  `{:push, ...}`, `{:pop, ...}`, `{:replace, ...}`).
+
+  Registering your own handler lets you intercept custom action tuples returned from
+  `handle_event/3` without modifying any framework code.
+
+  ## Usage
+
+      Drafter.ActionRegistry.register(MyApp.DrawerHandler)
+
+  ## Priority
+
+  Registered handlers take priority over the built-in handler. A handler that returns
+  `{:ok, new_state}` stops dispatch; one that returns `:unhandled` passes control to
+  the next handler in the chain.
+  """
 
   use Agent
 

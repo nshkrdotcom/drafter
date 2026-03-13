@@ -168,6 +168,56 @@ end
 - `{:push, module, props, opts}` - Push a new screen
 - `{:pop, result}` - Pop current screen
 
+### Custom Action Handlers
+
+By default, return values from `handle_event/3` are handled by Drafter's built-in
+dispatcher. You can extend this system without modifying any framework code by
+implementing the `Drafter.ActionHandler` behaviour.
+
+This is the right approach for third-party widgets or plugins that introduce new
+action shapes — no changes to the base library required.
+
+**1. Implement the behaviour:**
+
+```elixir
+defmodule MyApp.DrawerHandler do
+  @behaviour Drafter.ActionHandler
+
+  @impl true
+  def handle_action({:open_drawer, id}, acc_state) do
+    {:ok, %{acc_state | open_drawer: id}}
+  end
+
+  def handle_action({:close_drawer}, acc_state) do
+    {:ok, %{acc_state | open_drawer: nil}}
+  end
+
+  def handle_action(_action, _acc_state), do: :unhandled
+end
+```
+
+**2. Register before `Drafter.run/2`:**
+
+```elixir
+Drafter.ActionRegistry.register(MyApp.DrawerHandler)
+Drafter.run(MyApp)
+```
+
+**3. Return custom actions from any event handler:**
+
+```elixir
+def handle_event(:open_settings, _data, state) do
+  {:open_drawer, :settings}
+end
+```
+
+Handlers are checked in registration order. Returning `{:ok, new_state}` stops
+dispatch; returning `:unhandled` passes control to the next handler. The built-in
+handler runs last and covers all standard return values.
+
+See `examples/custom_action.exs` for a complete working example that demonstrates
+custom action types, state mutation, and native desktop notifications.
+
 ### Screens and Navigation
 
 Create multi-screen applications with modals and toasts:
@@ -402,6 +452,7 @@ elixir examples/key_inspector.exs
 elixir examples/code_browser.exs
 elixir examples/syntax_highlight.exs
 elixir examples/custom_loop.exs
+elixir examples/custom_action.exs
 ```
 
 Examples that are compiled into the library can be run via `mix run`:

@@ -22,3 +22,4 @@ elixir examples/<name>.exs
 | `key_inspector.exs` | Live view of all keyboard, mouse, and resize events — useful when building keybindings |
 | `theme_sandbox.exs` | Full widget gallery with live theme switching |
 | `custom_loop.exs` | Advanced: bring-your-own event loop using low-level APIs |
+| `custom_action.exs` | Custom action handlers via `Drafter.ActionHandler` — adds a new action type without touching the framework; also demonstrates native desktop notifications (macOS, Linux, Windows) |
