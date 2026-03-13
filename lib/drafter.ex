@@ -393,6 +393,21 @@ defmodule Drafter do
                         case app_module.handle_event(callback, data, acc_state) do
                           {:ok, new_state} -> new_state
                           {:noreply, new_state} -> new_state
+                          {:show_modal, screen_module, props, opts} ->
+                            Drafter.ScreenManager.show_modal(screen_module, props, opts)
+                            acc_state
+                          {:show_toast, message, opts} ->
+                            Drafter.ScreenManager.show_toast(message, opts)
+                            acc_state
+                          {:push, screen_module, props, opts} ->
+                            Drafter.ScreenManager.push(screen_module, props, opts)
+                            acc_state
+                          {:pop, result} ->
+                            Drafter.ScreenManager.pop(result)
+                            acc_state
+                          {:replace, screen_module, props, opts} ->
+                            Drafter.ScreenManager.replace(screen_module, props, opts)
+                            acc_state
                           _ -> acc_state
                         end
                       _ -> acc_state
