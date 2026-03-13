@@ -35,11 +35,12 @@ defmodule Drafter.Transport.SSHDriver do
   @impl GenServer
   def handle_call({:setup, event_manager}, _from, state) do
     :io.setopts([:binary, {:encoding, :unicode}, {:echo, false}])
+    size = detect_size()
     IO.write([ANSI.enter_alt_screen(), ANSI.clear_screen(), ANSI.cursor_to(1, 1), ANSI.hide_cursor(), ANSI.enable_mouse()])
     driver_pid = self()
     spawn_link(fn -> stdin_reader(driver_pid) end)
-    spawn_link(fn -> size_poller(driver_pid, detect_size()) end)
-    {:reply, :ok, %{state | event_manager: event_manager, raw_mode: true, mouse_enabled: true}}
+    spawn_link(fn -> size_poller(driver_pid, size) end)
+    {:reply, :ok, %{state | event_manager: event_manager, size: size, raw_mode: true, mouse_enabled: true}}
   end
 
   def handle_call(:cleanup, _from, state) do
@@ -96,8 +97,8 @@ defmodule Drafter.Transport.SSHDriver do
 
   defp detect_size() do
     case {:io.columns(), :io.rows()} do
-      {{:ok, cols}, {:ok, rows}} -> {cols, rows}
-      _ -> {80, 24}
+      {{:ok, cols}, {:ok, rows}} -> {cols, rows - 1}
+      _ -> {80, 23}
     end
   end
 

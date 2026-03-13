@@ -334,7 +334,7 @@ defmodule Drafter do
     app_state = app_module.mount(mount_props)
 
     {width, height} = Compositor.get_screen_size()
-    screen_rect = %{x: 0, y: 0, width: width, height: height}
+    screen_rect = make_screen_rect(width, height)
 
     {_, hierarchy} = render_app(app_module, app_state, screen_rect)
 
@@ -354,7 +354,7 @@ defmodule Drafter do
     app_state = Map.merge(app_state, mount_props)
 
     {width, height} = Compositor.get_screen_size()
-    screen_rect = %{x: 0, y: 0, width: width, height: height}
+    screen_rect = make_screen_rect(width, height)
 
     {_, hierarchy} = render_app(app_module, app_state, screen_rect)
 
@@ -371,7 +371,7 @@ defmodule Drafter do
   defp shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings) do
     receive do
       {:tui_event, {:resize, {width, height}}} ->
-        new_screen_rect = %{x: 0, y: 0, width: width, height: height}
+        new_screen_rect = make_screen_rect(width, height)
         {_, new_hierarchy} = render_app(app_module, app_state, new_screen_rect, widget_hierarchy)
         shared_session_loop(app_module, app_state, new_screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
 
@@ -571,7 +571,7 @@ defmodule Drafter do
     app_state = app_module.mount(initial_props)
 
     {width, height} = Compositor.get_screen_size()
-    screen_rect = %{x: 0, y: 0, width: width, height: height}
+    screen_rect = make_screen_rect(width, height)
 
     {_, hierarchy} = render_app(app_module, app_state, screen_rect)
 
@@ -584,7 +584,7 @@ defmodule Drafter do
   defp app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy) do
     receive do
       {:tui_event, {:resize, {width, height}}} ->
-        new_screen_rect = %{x: 0, y: 0, width: width, height: height}
+        new_screen_rect = make_screen_rect(width, height)
         {_, new_hierarchy} = render_app(app_module, app_state, new_screen_rect, widget_hierarchy)
         app_event_loop(app_module, app_state, new_screen_rect, timers, new_hierarchy)
 
@@ -1096,6 +1096,10 @@ defmodule Drafter do
     Enum.each(timers, fn {_id, timer_ref} ->
       :timer.cancel(timer_ref)
     end)
+  end
+
+  defp make_screen_rect(width, height) do
+    %{x: 0, y: 0, width: width, height: height}
   end
 
   defp render_app(app_module, app_state, screen_rect, existing_hierarchy \\ nil, _opts \\ []) do
