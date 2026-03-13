@@ -41,6 +41,7 @@ defmodule Drafter.Transport.SSH do
 
   defp do_start_shell(app_module, mode, mount_props, username) do
     Process.flag(:trap_exit, true)
+    _ = Drafter.Logging.setup()
     gl = Process.group_leader()
     username_str = to_string(username)
     full_props = Map.put(mount_props, :username, username_str)

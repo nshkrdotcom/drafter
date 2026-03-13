@@ -35,7 +35,7 @@ defmodule Drafter.Transport.SSHDriver do
   @impl GenServer
   def handle_call({:setup, event_manager}, _from, state) do
     :io.setopts([:binary, {:encoding, :unicode}, {:echo, false}])
-    IO.write([ANSI.enter_alt_screen(), ANSI.hide_cursor(), ANSI.clear_screen(), ANSI.enable_mouse()])
+    IO.write([ANSI.enter_alt_screen(), ANSI.clear_screen(), ANSI.cursor_to(1, 1), ANSI.hide_cursor(), ANSI.enable_mouse()])
     driver_pid = self()
     spawn_link(fn -> stdin_reader(driver_pid) end)
     spawn_link(fn -> size_poller(driver_pid, detect_size()) end)
