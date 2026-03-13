@@ -532,17 +532,18 @@ defmodule Drafter do
   end
 
   defp start_system() do
-    with {:ok, _} <- Event.Manager.start_link(),
-         {:ok, _} <- Terminal.Driver.start_link(),
-         {:ok, _} <- Compositor.start_link(),
-         {:ok, _} <- ThemeManager.start_link(),
+    with {:ok, _} <- ensure_started(Event.Manager.start_link()),
+         {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
+         {:ok, _} <- ensure_started(Compositor.start_link()),
+         {:ok, _} <- ensure_started(ThemeManager.start_link()),
          :ok <- Terminal.Driver.setup() do
       :ok
-    else
-      {:error, {:already_started, _}} -> :ok
-      error -> error
     end
   end
+
+  defp ensure_started({:ok, pid}), do: {:ok, pid}
+  defp ensure_started({:error, {:already_started, pid}}), do: {:ok, pid}
+  defp ensure_started(error), do: error
 
   defp run_app(app_module, _opts) do
     app_pid =
