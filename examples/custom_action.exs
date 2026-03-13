@@ -15,9 +15,11 @@ defmodule Example.DesktopNotify do
 
       {:win32, _} ->
         ps_script = windows_toast_script(escape(title), escape(message))
+
         System.cmd("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps_script],
           stderr_to_stdout: true
         )
+
         :ok
     end
   end
@@ -71,10 +73,10 @@ defmodule EventFeedApp do
       |> Enum.map(fn event ->
         {color, tag} =
           case event.level do
-            :info     -> {:cyan,       " INFO "}
-            :success  -> {:green,      "  OK  "}
-            :warning  -> {:yellow,     " WARN "}
-            :error    -> {:red,        " ERR  "}
+            :info -> {:cyan, " INFO "}
+            :success -> {:green, "  OK  "}
+            :warning -> {:yellow, " WARN "}
+            :error -> {:red, " ERR  "}
             :critical -> {:bright_red, " CRIT "}
           end
 
@@ -100,31 +102,41 @@ defmodule EventFeedApp do
       label("Fire an event:", style: %{fg: :bright_black}),
       horizontal(
         [
-          button("Info",     on_click: :fire_info),
-          button("Success",  on_click: :fire_success,  variant: :success),
-          button("Warning",  on_click: :fire_warning,  variant: :warning),
-          button("Error",    on_click: :fire_error,    variant: :error),
+          button("Info", on_click: :fire_info),
+          button("Success", on_click: :fire_success, variant: :success),
+          button("Warning", on_click: :fire_warning, variant: :warning),
+          button("Error", on_click: :fire_error, variant: :error),
           button("Critical", on_click: :fire_critical, variant: :error)
         ],
         gap: 1
       ),
       label(
-        "Critical level also triggers a native desktop notification (macOS / Linux).",
+        "Critical level also triggers a native desktop notification.",
         style: %{fg: :bright_black}
       ),
       footer(bindings: [{"q", "quit"}])
     ])
   end
 
-  def handle_event(:fire_info,     _data, _state), do: {:add_event, "Informational event fired",             :info}
-  def handle_event(:fire_success,  _data, _state), do: {:add_event, "Operation completed successfully",      :success}
-  def handle_event(:fire_warning,  _data, _state), do: {:add_event, "Something may need your attention",    :warning}
-  def handle_event(:fire_error,    _data, _state), do: {:add_event, "An error occurred in the subsystem",   :error}
-  def handle_event(:fire_critical, _data, _state), do: {:add_event, "CRITICAL: immediate action required",  :critical}
-  def handle_event(_widget_event, _data, state),   do: {:noreply, state}
+  def handle_event(:fire_info, _data, _state),
+    do: {:add_event, "Informational event fired", :info}
+
+  def handle_event(:fire_success, _data, _state),
+    do: {:add_event, "Operation completed successfully", :success}
+
+  def handle_event(:fire_warning, _data, _state),
+    do: {:add_event, "Something may need your attention", :warning}
+
+  def handle_event(:fire_error, _data, _state),
+    do: {:add_event, "An error occurred in the subsystem", :error}
+
+  def handle_event(:fire_critical, _data, _state),
+    do: {:add_event, "CRITICAL: immediate action required", :critical}
+
+  def handle_event(_widget_event, _data, state), do: {:noreply, state}
 
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
-  def handle_event(_event, state),      do: {:noreply, state}
+  def handle_event(_event, state), do: {:noreply, state}
 end
 
 Drafter.run(EventFeedApp)
