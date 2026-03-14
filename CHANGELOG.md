@@ -3,6 +3,12 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.14] - 2026-03-14
+### Fixed
+- Timer-driven re-renders skipped when `on_timer/2` returns state unchanged (`===`);
+  applies to both `app_event_loop` and `shared_session_loop`. Eliminates redundant
+  `render_app` / widget tree traversal on poll timers that find no new data.
+
 ## [0.1.13] - 2026-03-14 *
 ### Added
 - Multi-series line charts: pass a list of series (list of lists) to `chart_type: :line`

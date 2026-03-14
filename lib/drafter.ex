@@ -471,8 +471,12 @@ defmodule Drafter do
             app_state
           end
 
-        {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
-        shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
+        if new_app_state === app_state do
+          shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+        else
+          {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+          shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
+        end
 
       _other ->
         shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
@@ -750,8 +754,13 @@ defmodule Drafter do
 
       {:timer, timer_id} ->
         new_app_state = app_module.on_timer(timer_id, app_state)
-        {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
-        app_event_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy)
+
+        if new_app_state === app_state do
+          app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+        else
+          {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
+          app_event_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy)
+        end
 
       {:set_interval, interval_ms, timer_id} ->
         timer_ref = :timer.send_interval(interval_ms, {:timer, timer_id})
