@@ -1,23 +1,28 @@
 defmodule Drafter.Widget.Collapsible do
   @moduledoc """
-  Renders an expandable section with a title row and collapsible text content.
+  Renders an expandable section with a title row and collapsible content.
 
   The widget displays a `▶` arrow when collapsed and `▼` when expanded.
   Pressing `Enter`, `Space`, or clicking the title row toggles the expanded
   state. The `:on_toggle` callback is invoked with the new boolean state after
-  each toggle. Content text is word-wrapped to fit the available width.
+  each toggle.
+
+  Content can be a string (word-wrapped to fit the width) or a list of widget
+  descriptors rendered via the layout engine. When using widget descriptors,
+  provide `:content_height` to control the expanded height.
 
   ## Options
 
     * `:title` - header text shown in the toggle row (default `"Collapsible"`)
-    * `:content` - body text shown when expanded (default `""`)
+    * `:content` - body text string or list of widget descriptors (default `""`)
+    * `:content_height` - number of rows for the expanded body when content is a widget list (default `10`)
     * `:expanded` - initial expansion state: `true` / `false` (default)
     * `:on_toggle` - one-arity callback invoked with the new `expanded` boolean
 
   ## Usage
 
-      collapsible(title: "Details", content: "Full description here...")
-      collapsible(title: "Advanced", content: long_text, expanded: true, on_toggle: &handle_toggle/1)
+      collapsible("Details", "Full description here...")
+      collapsible("Options", [checkbox("Enable feature", id: :feat), checkbox("Debug mode", id: :dbg)], content_height: 5)
   """
 
   use Drafter.Widget,
@@ -31,6 +36,7 @@ defmodule Drafter.Widget.Collapsible do
   defstruct [
     :title,
     :content,
+    :content_height,
     :expanded,
     :focused,
     :hovered,
@@ -38,9 +44,12 @@ defmodule Drafter.Widget.Collapsible do
   ]
 
   def mount(props) do
+    content = Map.get(props, :content, "")
+
     %__MODULE__{
       title: Map.get(props, :title, "Collapsible"),
-      content: Map.get(props, :content, ""),
+      content: content,
+      content_height: Map.get(props, :content_height, default_content_height(content)),
       expanded: Map.get(props, :expanded, false),
       focused: Map.get(props, :focused, false),
       hovered: Map.get(props, :hovered, false),
@@ -70,32 +79,20 @@ defmodule Drafter.Widget.Collapsible do
       ])
 
     if state.expanded do
-      content_lines = Text.wrap(state.content, rect.width - 2, :word)
-
-      content_strips =
-        Enum.map(content_lines, fn line ->
-          padded_line = "  " <> Text.pad_right(line, rect.width - 2)
-          Strip.new([Segment.new(padded_line, bg_style)])
-        end)
-
+      content_strips = render_content(state.content, state.content_height, rect, bg_style)
       all_strips = [title_strip | content_strips]
-
       current_height = length(all_strips)
 
       if current_height < rect.height do
-        empty_line = Segment.new(String.duplicate(" ", rect.width), bg_style)
-        empty_strip = Strip.new([empty_line])
-        padding = List.duplicate(empty_strip, rect.height - current_height)
-        all_strips ++ padding
+        empty_strip = Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])
+        all_strips ++ List.duplicate(empty_strip, rect.height - current_height)
       else
         Enum.take(all_strips, rect.height)
       end
     else
       if rect.height > 1 do
-        empty_line = Segment.new(String.duplicate(" ", rect.width), bg_style)
-        empty_strip = Strip.new([empty_line])
-        padding = List.duplicate(empty_strip, rect.height - 1)
-        [title_strip | padding]
+        empty_strip = Strip.new([Segment.new(String.duplicate(" ", rect.width), bg_style)])
+        [title_strip | List.duplicate(empty_strip, rect.height - 1)]
       else
         [title_strip]
       end
@@ -103,7 +100,18 @@ defmodule Drafter.Widget.Collapsible do
   end
 
   def update(props, state) do
-    Map.merge(state, props)
+    new_content = Map.get(props, :content, state.content)
+
+    new_content_height =
+      cond do
+        Map.has_key?(props, :content_height) -> props.content_height
+        Map.has_key?(props, :content) -> default_content_height(new_content) || state.content_height
+        true -> state.content_height
+      end
+
+    state
+    |> Map.merge(props)
+    |> Map.put(:content_height, new_content_height)
   end
 
   def handle_event(event, state) do
@@ -137,6 +145,23 @@ defmodule Drafter.Widget.Collapsible do
         {:noreply, state}
     end
   end
+
+  defp render_content(content, _content_height, rect, bg_style) when is_binary(content) do
+    content_lines = Text.wrap(content, rect.width - 2, :word)
+
+    Enum.map(content_lines, fn line ->
+      padded_line = "  " <> Text.pad_right(line, rect.width - 2)
+      Strip.new([Segment.new(padded_line, bg_style)])
+    end)
+  end
+
+  defp render_content(content, content_height, _rect, bg_style) when is_list(content) do
+    empty_strip = Strip.new([Segment.new("", bg_style)])
+    List.duplicate(empty_strip, content_height || 0)
+  end
+
+  defp default_content_height(content) when is_binary(content), do: nil
+  defp default_content_height(_content), do: 10
 
   defp toggle(state) do
     new_state = %{state | expanded: not state.expanded}

@@ -681,83 +681,62 @@ defmodule Drafter.WidgetHierarchy do
     if focused_rect == nil do
       {hierarchy, []}
     else
-      focused_center = %{
-        x: focused_rect.x + div(focused_rect.width, 2),
-        y: focused_rect.y + div(focused_rect.height, 2)
-      }
+      focused_point = %{x: focused_rect.x, y: focused_rect.y}
 
       candidates =
         focusable_widgets
         |> Enum.reject(&(&1 == focused_id))
         |> Enum.map(fn widget_id ->
           rect = Map.get(hierarchy.widget_rects, widget_id)
-
-          if rect do
-            center = %{
-              x: rect.x + div(rect.width, 2),
-              y: rect.y + div(rect.height, 2)
-            }
-
-            {widget_id, rect, center, calculate_direction(focused_center, center)}
-          else
-            nil
-          end
+          if rect, do: {widget_id, rect, %{x: rect.x, y: rect.y}}, else: nil
         end)
         |> Enum.reject(&is_nil/1)
 
       target =
         case direction do
-          :left ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, _center, dir} ->
-              dir == :left or dir == :up_left or dir == :down_left
-            end)
-            |> Enum.min_by(
-              fn {_id, _rect, center, _dir} ->
-                abs(center.y - focused_center.y)
-              end,
-              fn -> nil end
-            )
-
-          :right ->
-            candidates
-            |> Enum.filter(fn {_id, _rect, _center, dir} ->
-              dir == :right or dir == :up_right or dir == :down_right
-            end)
-            |> Enum.min_by(
-              fn {_id, _rect, center, _dir} ->
-                abs(center.y - focused_center.y)
-              end,
-              fn -> nil end
-            )
-
           :up ->
             candidates
-            |> Enum.filter(fn {_id, _rect, _center, dir} ->
-              dir == :up or dir == :up_left or dir == :up_right
-            end)
+            |> Enum.filter(fn {_id, _rect, pt} -> pt.y < focused_point.y end)
             |> Enum.min_by(
-              fn {_id, _rect, center, _dir} ->
-                abs(center.x - focused_center.x)
+              fn {_id, _rect, pt} ->
+                {focused_point.y - pt.y, abs(pt.x - focused_point.x)}
               end,
               fn -> nil end
             )
 
           :down ->
             candidates
-            |> Enum.filter(fn {_id, _rect, _center, dir} ->
-              dir == :down or dir == :down_left or dir == :down_right
-            end)
+            |> Enum.filter(fn {_id, _rect, pt} -> pt.y > focused_point.y end)
             |> Enum.min_by(
-              fn {_id, _rect, center, _dir} ->
-                abs(center.x - focused_center.x)
+              fn {_id, _rect, pt} ->
+                {pt.y - focused_point.y, abs(pt.x - focused_point.x)}
+              end,
+              fn -> nil end
+            )
+
+          :left ->
+            candidates
+            |> Enum.filter(fn {_id, _rect, pt} -> pt.x < focused_point.x end)
+            |> Enum.min_by(
+              fn {_id, _rect, pt} ->
+                {focused_point.x - pt.x, abs(pt.y - focused_point.y)}
+              end,
+              fn -> nil end
+            )
+
+          :right ->
+            candidates
+            |> Enum.filter(fn {_id, _rect, pt} -> pt.x > focused_point.x end)
+            |> Enum.min_by(
+              fn {_id, _rect, pt} ->
+                {pt.x - focused_point.x, abs(pt.y - focused_point.y)}
               end,
               fn -> nil end
             )
         end
 
       case target do
-        {widget_id, _rect, _center, _dir} ->
+        {widget_id, _rect, _pt} ->
           {focus_widget(hierarchy, widget_id, :down), []}
 
         nil ->
@@ -1057,7 +1036,10 @@ defmodule Drafter.WidgetHierarchy do
       is_focusable_widget?(widget_info.module) and not is_disabled?(widget_info.state) and
         not MapSet.member?(hidden, widget_id)
     end)
-    |> Enum.sort_by(fn {_widget_id, widget_info} -> widget_info.order end)
+    |> Enum.sort_by(fn {widget_id, _widget_info} ->
+      rect = Map.get(hierarchy.widget_rects, widget_id, %{y: 0, x: 0})
+      {Map.get(rect, :y, 0), Map.get(rect, :x, 0)}
+    end)
     |> Enum.map(fn {widget_id, _widget_info} -> widget_id end)
   end
 

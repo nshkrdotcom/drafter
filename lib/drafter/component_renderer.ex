@@ -1311,7 +1311,6 @@ defmodule Drafter.ComponentRenderer do
 
       {:radio_set, options, opts} ->
         widget_id = Keyword.get(opts, :id, :"radio_set_#{id_counter}")
-        on_change = Keyword.get(opts, :on_change)
         selected = Keyword.get(opts, :selected)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
@@ -1322,17 +1321,14 @@ defmodule Drafter.ComponentRenderer do
             c when is_atom(c) -> c
           end)
 
+        on_change_fn = Binding.create_bound_callback(opts, :selected)
+
         mount_props = %{
           options: options,
           selected: selected,
           visible_height: rect.height,
           classes: classes,
-          on_change:
-            if on_change do
-              fn value -> send_app_callback(on_change, value) end
-            else
-              nil
-            end
+          on_change: on_change_fn
         }
 
         new_hierarchy =
@@ -1341,7 +1337,7 @@ defmodule Drafter.ComponentRenderer do
             |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
-              on_change: mount_props.on_change,
+              on_change: on_change_fn,
               classes: classes
             })
           else
@@ -1409,27 +1405,30 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:collapsible, title, content, opts} ->
-        widget_id = :"collapsible_#{id_counter}"
+        widget_id = Keyword.get(opts, :id, :"collapsible_#{:erlang.phash2(title)}")
         expanded = Keyword.get(opts, :expanded, false)
         on_toggle = Keyword.get(opts, :on_toggle)
+        content_height = Keyword.get(opts, :content_height)
 
-        mount_props = %{
-          title: title,
-          content: content,
-          expanded: expanded,
-          on_toggle:
-            if on_toggle do
-              fn value -> send_app_callback(on_toggle, value) end
-            else
-              nil
-            end
-        }
+        mount_props =
+          %{
+            title: title,
+            content: content,
+            expanded: expanded,
+            on_toggle:
+              if on_toggle do
+                fn value -> send_app_callback(on_toggle, value) end
+              else
+                nil
+              end
+          }
+          |> then(fn p -> if content_height, do: Map.put(p, :content_height, content_height), else: p end)
 
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
-            _existing_state = WidgetHierarchy.get_widget_state(hierarchy, widget_id)
-
-            updated_props = %{content: content}
+            updated_props =
+              %{content: content}
+              |> then(fn p -> if content_height, do: Map.put(p, :content_height, content_height), else: p end)
 
             updated_props =
               if on_toggle do
@@ -1456,7 +1455,39 @@ defmodule Drafter.ComponentRenderer do
             )
           end
 
-        {new_hierarchy, id_counter + 1}
+        current_expanded =
+          case WidgetHierarchy.get_widget_state(new_hierarchy, widget_id) do
+            %{expanded: exp} -> exp
+            _ -> expanded
+          end
+
+        if current_expanded and is_list(content) do
+          effective_content_height = content_height || 10
+          content_rect = %{
+            x: rect.x,
+            y: rect.y + 1,
+            width: rect.width,
+            height: min(effective_content_height, max(0, rect.height - 1))
+          }
+
+          {children_hierarchy, _} =
+            render_layout(
+              new_hierarchy,
+              :vertical,
+              content,
+              content_rect,
+              theme,
+              app_state,
+              widget_id,
+              id_counter + 1,
+              [],
+              app_module
+            )
+
+          {children_hierarchy, id_counter + 1}
+        else
+          {new_hierarchy, id_counter + 1}
+        end
 
       {:tabbed_content, tabs, opts} ->
         widget_id = Keyword.get(opts, :id, :"tabbed_content_#{id_counter}")
@@ -2446,14 +2477,14 @@ defmodule Drafter.ComponentRenderer do
 
         {preferred, max(flex, 1), has_flex}
 
-      {:collapsible, title, content, _opts} ->
+      {:collapsible, title, _content, _opts} ->
         preferred =
           if hierarchy do
             collapsible_state = find_collapsible_state(hierarchy, title)
 
             case collapsible_state do
               %{expanded: true} ->
-                estimate_collapsible_height(content, 80)
+                estimate_collapsible_height(collapsible_state)
 
               _ ->
                 1
@@ -2623,13 +2654,13 @@ defmodule Drafter.ComponentRenderer do
       {:selection_list, options, opts} ->
         Keyword.get(opts, :height, min(length(options), 5))
 
-      {:collapsible, title, content, _opts} ->
+      {:collapsible, title, _content, _opts} ->
         if hierarchy do
           collapsible_state = find_collapsible_state(hierarchy, title)
 
           case collapsible_state do
             %{expanded: true} ->
-              estimate_collapsible_height(content, 80)
+              estimate_collapsible_height(collapsible_state)
 
             _ ->
               1
@@ -2731,10 +2762,14 @@ defmodule Drafter.ComponentRenderer do
     end)
   end
 
-  defp estimate_collapsible_height(content, estimated_width) when is_binary(content) do
-    lines = Drafter.Text.wrap(content, estimated_width, :word)
+  defp estimate_collapsible_height(%{content: content, content_height: content_height}) when is_list(content) do
+    1 + (content_height || 10)
+  end
+
+  defp estimate_collapsible_height(%{content: content}) when is_binary(content) do
+    lines = Drafter.Text.wrap(content, 80, :word)
     1 + length(lines)
   end
 
-  defp estimate_collapsible_height(_content, _estimated_width), do: 2
+  defp estimate_collapsible_height(_state), do: 2
 end
