@@ -321,6 +321,7 @@ defmodule Drafter.ComponentRenderer do
         value = Binding.get_bound_value(opts, app_state, "")
         placeholder = Keyword.get(opts, :placeholder, "")
         on_submit = Keyword.get(opts, :on_submit)
+        keep_focus = Keyword.get(opts, :keep_focus, false)
         validators = Keyword.get(opts, :validators)
         disabled = Keyword.get(opts, :disabled, false)
         readonly = Keyword.get(opts, :readonly, false)
@@ -344,7 +345,12 @@ defmodule Drafter.ComponentRenderer do
           on_change: Binding.create_bound_callback(opts, :text),
           on_submit:
             if on_submit do
-              fn text -> send_app_callback(on_submit, text) end
+              session_pid = self()
+              fn text ->
+                result = send_app_callback(on_submit, text)
+                if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
+                result
+              end
             else
               nil
             end

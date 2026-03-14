@@ -339,6 +339,7 @@ Available easing functions: `:linear`, `:ease`, `:ease_in`, `:ease_out`, `:ease_
 ## Complete Example
 
 ```elixir
+Mix.install([{:drafter, "~> 0.1"}])
 defmodule TodoApp do
   use Drafter.App
 
@@ -350,17 +351,28 @@ defmodule TodoApp do
   end
 
   def render(state) do
-    todo_items = Enum.map(state.todos, fn todo ->
-      label("  • #{todo}")
-    end)
+    todo_items =
+      Enum.map(state.todos, fn todo ->
+        label("  • #{todo}")
+      end)
 
     vertical([
       header("Todo App"),
       scrollable(todo_items, flex: 1),
-      horizontal([
-        text_input(placeholder: "Add todo...", bind: :new_todo, flex: 1),
-        button("Add", on_click: :add_todo)
-      ], gap: 1),
+      horizontal(
+        [
+          text_input(
+            id: :new_todo_input,
+            placeholder: "Add todo...",
+            bind: :new_todo,
+            on_submit: :add_todo,
+            keep_focus: true,
+            flex: 1
+          ),
+          button("Add", on_click: :add_todo)
+        ],
+        gap: 1
+      ),
       footer(bindings: [{"q", "Quit"}, {"Enter", "Add"}])
     ])
   end
@@ -376,6 +388,8 @@ defmodule TodoApp do
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
 end
+
+Drafter.run(TodoApp)
 ```
 
 ## Syntax Highlighting

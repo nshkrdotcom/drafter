@@ -370,9 +370,17 @@ defmodule Drafter.Widget.TextInput do
         trigger_change(new_state)
         {:ok, new_state}
 
+      {:key, :enter} when state.focused and state.on_submit != nil ->
+        new_state = %{state | cursor_position: 0, scroll_offset: 0}
+        actions =
+          case trigger_submit(state) do
+            {:app_callback, _, _} = cb -> [cb]
+            _ -> []
+          end
+        {:ok, new_state, actions}
+
       {:key, :enter} when state.focused ->
-        trigger_submit(state)
-        {:noreply, state}
+        {:bubble, state}
 
       {:key, :d, [:ctrl]} when state.focused ->
         {:noreply, state}

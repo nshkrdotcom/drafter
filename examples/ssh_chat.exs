@@ -50,12 +50,12 @@ defmodule ChatApp do
       rule(),
       horizontal([
         label(" #{state.username} \u25b6: ", style: %{fg: :green}),
-        text_input(id: :message_input, bind: :input, flex: 1, placeholder: "Type a message...")
+        text_input(id: :message_input, bind: :input, on_submit: :send_message, keep_focus: true, flex: 1, placeholder: "Type a message...")
       ])
     ])
   end
 
-  def handle_event({:key, :enter}, state) do
+  def handle_event(:send_message, _text, state) do
     text = String.trim(state.input)
 
     if text == "" do
