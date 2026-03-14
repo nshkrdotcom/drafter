@@ -6,7 +6,7 @@ defmodule Drafter.MixProject do
 
     [
       app: :drafter,
-      version: "0.1.11",
+      version: "0.1.13",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -18,7 +18,7 @@ defmodule Drafter.MixProject do
       homepage_url: "https://github.com/jaman/drafter",
       docs: [
         main: "Drafter",
-        extras: ["README.md", "guides/remote_tui.md": [title: "Remote TUI"]],
+        extras: ["README.md", "CHANGELOG.md", "guides/remote_tui.md": [title: "Remote TUI"]],
         groups_for_modules: [
           "Remote Servers": [Drafter.Server],
           Core: [Drafter, Drafter.App, Drafter.Widget, Drafter.Screen],
