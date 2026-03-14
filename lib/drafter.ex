@@ -1099,6 +1099,7 @@ defmodule Drafter do
     end)
   end
 
+
   defp make_screen_rect(width, height) do
     %{x: 0, y: 0, width: width, height: height}
   end

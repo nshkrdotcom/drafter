@@ -380,13 +380,8 @@ defmodule Drafter.ComponentRenderer do
               end
 
             updated_props =
-              if existing_state.text != value do
-                updated_props
-                |> Map.put(:text, value)
-                |> Map.put(:cursor_position, 0)
-                |> Map.put(:scroll_offset, 0)
-                |> Map.put(:selection_start, nil)
-                |> Map.put(:selection_end, nil)
+              if existing_state && existing_state.text != value do
+                Map.put(updated_props, :text, value)
               else
                 updated_props
               end
