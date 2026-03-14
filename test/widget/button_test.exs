@@ -6,7 +6,11 @@ defmodule Drafter.Widget.ButtonTest do
   alias Drafter.Draw.{Segment, Strip}
 
   setup do
-    start_supervised!(ThemeManager)
+    case start_supervised(ThemeManager) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
+
     :ok
   end
 

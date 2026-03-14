@@ -10,6 +10,7 @@ defmodule Drafter.Compositor do
     :terminal_driver,
     :event_manager,
     screen_buffer: [],
+    rendered_buffer: [],
     dirty_regions: [],
     screen_size: {80, 24},
     rendering: false
@@ -87,14 +88,14 @@ defmodule Drafter.Compositor do
   def handle_cast(:clear_screen, state) do
     {width, height} = state.screen_size
     empty_buffer = create_empty_buffer(width, height)
-    new_state = %{state | screen_buffer: empty_buffer}
+    new_state = %{state | screen_buffer: empty_buffer, rendered_buffer: []}
     schedule_render(new_state)
   end
 
   def handle_cast(:refresh, state) do
     {width, height} = state.screen_size
     dirty_region = %{x: 0, y: 0, width: width, height: height}
-    new_state = %{state | dirty_regions: [dirty_region]}
+    new_state = %{state | rendered_buffer: [], dirty_regions: [dirty_region]}
     schedule_render(new_state)
   end
 
@@ -106,6 +107,7 @@ defmodule Drafter.Compositor do
       state
       | screen_size: {width, height},
         screen_buffer: new_buffer,
+        rendered_buffer: [],
         dirty_regions: [%{x: 0, y: 0, width: width, height: height}]
     }
 
@@ -114,8 +116,8 @@ defmodule Drafter.Compositor do
 
   def handle_info(:render_frame, state) do
     if not Enum.empty?(state.dirty_regions) do
-      render_to_terminal(state)
-      {:noreply, %{state | dirty_regions: [], rendering: false}}
+      new_rendered = render_to_terminal(state)
+      {:noreply, %{state | rendered_buffer: new_rendered, dirty_regions: [], rendering: false}}
     else
       {:noreply, %{state | rendering: false}}
     end
@@ -206,26 +208,28 @@ defmodule Drafter.Compositor do
   end
 
   defp render_to_terminal(state) do
-    output = build_terminal_output(state.screen_buffer, state.dirty_regions)
+    output = build_terminal_output(state.screen_buffer, state.rendered_buffer)
     driver_write(state.terminal_driver, output)
+    state.screen_buffer
   end
 
-  defp build_terminal_output(screen_buffer, _dirty_regions) do
-    output = [
-      Terminal.ANSI.cursor_to(1, 1),
-      Terminal.ANSI.sync_start()
-    ]
-
-    screen_output =
+  defp build_terminal_output(screen_buffer, rendered_buffer) do
+    rows =
       screen_buffer
       |> Enum.with_index()
-      |> Enum.map(fn {strip, line_index} ->
-        [
-          Terminal.ANSI.cursor_to(1, line_index + 1),
-          Strip.to_ansi(strip)
-        ]
+      |> Enum.flat_map(fn {strip, line_index} ->
+        prev_strip = Enum.at(rendered_buffer, line_index)
+
+        if prev_strip && prev_strip.cache_key == strip.cache_key do
+          []
+        else
+          [Terminal.ANSI.cursor_to(1, line_index + 1), Strip.to_ansi(strip)]
+        end
       end)
 
-    output ++ screen_output ++ [Terminal.ANSI.sync_end()]
+    case rows do
+      [] -> []
+      _ -> [Terminal.ANSI.sync_start()] ++ rows ++ [Terminal.ANSI.sync_end()]
+    end
   end
 end
