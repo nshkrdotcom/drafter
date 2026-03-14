@@ -278,7 +278,7 @@ defmodule Drafter.ComponentRenderer do
 
       {:checkbox, label, opts} ->
         widget_id = Keyword.get(opts, :id, :"checkbox_#{id_counter}")
-        checked = Binding.get_bound_value(opts, app_state, false)
+        checked = Binding.get_bound_value(opts, app_state, Keyword.get(opts, :checked, false))
         custom_style = Keyword.get(opts, :style, %{})
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
@@ -302,7 +302,11 @@ defmodule Drafter.ComponentRenderer do
             hierarchy
             |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
-            |> WidgetHierarchy.update_widget(widget_id, %{classes: classes})
+            |> WidgetHierarchy.update_widget(widget_id, %{
+              checked: checked,
+              on_change: Binding.create_bound_callback(opts, :checked),
+              classes: classes
+            })
           else
             WidgetHierarchy.add_widget(
               hierarchy,
