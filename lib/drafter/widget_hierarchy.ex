@@ -745,24 +745,6 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
-  defp calculate_direction(from, to) do
-    dx = to.x - from.x
-    dy = to.y - from.y
-
-    angle = :math.atan2(dy, dx) * 180 / :math.pi()
-
-    cond do
-      angle >= -22.5 and angle < 22.5 -> :right
-      angle >= 22.5 and angle < 67.5 -> :down_right
-      angle >= 67.5 and angle < 112.5 -> :down
-      angle >= 112.5 and angle < 157.5 -> :down_left
-      angle >= 157.5 or angle < -157.5 -> :left
-      angle >= -157.5 and angle < -112.5 -> :up_left
-      angle >= -112.5 and angle < -67.5 -> :up
-      angle >= -67.5 and angle < -22.5 -> :up_right
-    end
-  end
-
   defp handle_mouse_event(hierarchy, mouse_event) do
     case {mouse_event.type, hierarchy.drag_capture_widget} do
       {:drag, capture_id} when capture_id != nil ->
