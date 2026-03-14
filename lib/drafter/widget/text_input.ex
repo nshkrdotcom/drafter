@@ -567,8 +567,7 @@ defmodule Drafter.Widget.TextInput do
   end
 
   defp adjust_scroll_offset(state) do
-    # Account for borders
-    content_width = state.width - 2
+    content_width = state.width
 
     cond do
       # Cursor is to the left of visible area

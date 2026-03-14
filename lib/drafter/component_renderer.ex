@@ -386,7 +386,8 @@ defmodule Drafter.ComponentRenderer do
               end
 
             updated_props =
-              if existing_state && existing_state.text != value do
+              if (Keyword.has_key?(opts, :bind) or Keyword.has_key?(opts, :value)) and
+                   existing_state.text != value do
                 Map.put(updated_props, :text, value)
               else
                 updated_props
