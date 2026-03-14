@@ -811,11 +811,8 @@ defmodule Drafter do
       {:widget_render_needed, _widget_id} ->
         if widget_hierarchy do
           updated_hierarchy = sync_widget_states(widget_hierarchy)
-
-          {_, final_hierarchy} =
-            render_app(app_module, app_state, screen_rect, updated_hierarchy)
-
-          app_event_loop(app_module, app_state, screen_rect, timers, final_hierarchy)
+          render_hierarchy(updated_hierarchy, screen_rect)
+          app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
         else
           app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
         end
@@ -1111,6 +1108,22 @@ defmodule Drafter do
 
   defp make_screen_rect(width, height) do
     %{x: 0, y: 0, width: width, height: height}
+  end
+
+  defp render_hierarchy(hierarchy, screen_rect) do
+    current_theme = ThemeManager.get_current_theme()
+    background_strips = create_app_background(screen_rect, current_theme)
+    widget_layers = create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+
+    if widget_layers == [] do
+      Compositor.render_strips(background_strips, 0, 0)
+    else
+      alias Drafter.LayerCompositor
+      viewport = %{width: screen_rect.width, height: screen_rect.height}
+      background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
+      final_strips = LayerCompositor.composite([background_layer] ++ widget_layers, viewport)
+      Compositor.render_strips(final_strips, 0, 0)
+    end
   end
 
   defp render_app(app_module, app_state, screen_rect, existing_hierarchy \\ nil, _opts \\ []) do

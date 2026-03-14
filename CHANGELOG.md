@@ -8,6 +8,10 @@ Versions marked with ★ were published to Hex.pm.
 - Timer-driven re-renders skipped when `on_timer/2` returns state unchanged (`===`);
   applies to both `app_event_loop` and `shared_session_loop`. Eliminates redundant
   `render_app` / widget tree traversal on poll timers that find no new data.
+- `{:widget_render_needed}` (fired by widget-internal timers such as the header clock)
+  no longer triggers `ComponentRenderer.render_tree`. It now calls `render_hierarchy`
+  which re-composites directly from the already-synced widget states, avoiding
+  `update_widget` calls — and therefore `filter_list` — on every clock tick.
 
 ## [0.1.13] - 2026-03-14 *
 ### Added
