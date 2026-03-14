@@ -1338,6 +1338,8 @@ defmodule Drafter.ComponentRenderer do
             |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
+              options: options,
+              selected: selected,
               on_change: on_change_fn,
               classes: classes
             })
