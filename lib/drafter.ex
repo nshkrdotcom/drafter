@@ -1497,7 +1497,20 @@ defmodule Drafter do
               if widget_info.pid do
                 Drafter.WidgetServer.get_render(widget_info.pid)
               else
-                strips = apply(widget_info.module, :render, [widget_info.state, widget_rect])
+                cache = Process.get(:widget_render_cache, %{})
+                cache_key = :erlang.phash2({widget_info.state, widget_rect.width, widget_rect.height})
+
+                strips =
+                  case Map.get(cache, widget_id) do
+                    {^cache_key, cached} ->
+                      cached
+
+                    _ ->
+                      result = apply(widget_info.module, :render, [widget_info.state, widget_rect])
+                      Process.put(:widget_render_cache, Map.put(cache, widget_id, {cache_key, result}))
+                      result
+                  end
+
                 {widget_rect, strips}
               end
 

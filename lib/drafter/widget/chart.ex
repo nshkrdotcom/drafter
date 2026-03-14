@@ -1370,17 +1370,16 @@ defmodule Drafter.Widget.Chart do
         end)
       end)
 
+    pixels_by_char = Enum.group_by(all_pixels, fn {{cx, cy}, _, _} -> {cx, cy} end)
+
     for row <- 0..(height - 1) do
       segments =
         for col <- 0..(width - 1) do
-          char_pixels =
-            all_pixels
-            |> Enum.filter(fn {{cx, cy}, _, _} -> cx == col and cy == row end)
+          char_pixels = Map.get(pixels_by_char, {col, row}, [])
 
-          if length(char_pixels) > 0 do
+          if char_pixels != [] do
             {bits, color} =
-              char_pixels
-              |> Enum.reduce({0, nil}, fn {_, {lx, ly}, c}, {b, _} ->
+              Enum.reduce(char_pixels, {0, nil}, fn {_, {lx, ly}, c}, {b, _} ->
                 bit = Map.get(@braille_dot_offsets, {lx, ly}, 0)
                 {b ||| bit, c}
               end)
