@@ -13,6 +13,10 @@ Versions marked with ★ were published to Hex.pm.
 - Negative value support documented and verified across all chart types
 - `multi_series_charts.exs` example demonstrating all new chart variants
 
+### Fixed
+- Area chart crash (`ArithmeticError`) when passed multi-series data; now dispatches to
+  `render_multi_series` matching the same guard added to line chart
+
 ### Changed
 - `Chart` moduledoc expanded with sections for negative values, multi-series API, and all bar types
 

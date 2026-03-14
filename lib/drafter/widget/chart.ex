@@ -743,37 +743,52 @@ defmodule Drafter.Widget.Chart do
   defp render_area_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
 
-    if length(data) < 2 do
-      empty_strips(height, bg)
-    else
-      range = state.max_value - state.min_value
-      pixel_height = height * 4
-      scroll_offset = state._scroll_offset || 0
+    cond do
+      length(data) < 2 ->
+        empty_strips(height, bg)
 
-      viewport_width = width * 2
-      total_points = length(data)
-      end_index = total_points - scroll_offset
-      start_index = max(0, end_index - viewport_width)
-      viewport_data = Enum.slice(data, start_index, viewport_width)
+      is_list(hd(data)) ->
+        colors =
+          if state.colors != [],
+            do: state.colors,
+            else: [{100, 200, 255}, {255, 130, 80}, {80, 255, 150}, {255, 100, 180}, {200, 180, 60}, {180, 100, 255}]
 
-      normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
+        render_multi_series(data, width, height,
+          bg: bg,
+          colors: colors,
+          min: state.min_value,
+          max: state.max_value
+        )
 
-      shifted =
-        if animation_offset > 0 do
-          shift = rem(animation_offset, length(normalized))
-          Enum.drop(normalized, shift) ++ Enum.take(normalized, shift)
-        else
-          normalized
-        end
+      true ->
+        range = state.max_value - state.min_value
+        pixel_height = height * 4
+        scroll_offset = state._scroll_offset || 0
 
-      pixels =
-        for x <- 0..(length(shifted) - 1) do
-          y = Enum.at(shifted, x)
-          for yi <- 0..y, do: {x, yi}
-        end
-        |> List.flatten()
+        viewport_width = width * 2
+        total_points = length(data)
+        end_index = total_points - scroll_offset
+        start_index = max(0, end_index - viewport_width)
+        viewport_data = Enum.slice(data, start_index, viewport_width)
 
-      render_braille_pixels(pixels, width, height, bg, fg)
+        normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
+
+        shifted =
+          if animation_offset > 0 do
+            shift = rem(animation_offset, length(normalized))
+            Enum.drop(normalized, shift) ++ Enum.take(normalized, shift)
+          else
+            normalized
+          end
+
+        pixels =
+          for x <- 0..(length(shifted) - 1) do
+            y = Enum.at(shifted, x)
+            for yi <- 0..y, do: {x, yi}
+          end
+          |> List.flatten()
+
+        render_braille_pixels(pixels, width, height, bg, fg)
     end
   end
 
