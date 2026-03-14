@@ -2129,25 +2129,37 @@ defmodule Drafter.ComponentRenderer do
 
     scrollable_rect = %{content_rect | height: max(0, content_rect.height - footer_height)}
 
+    scroll_offset_y =
+      case WidgetHierarchy.get_widget_state(hierarchy, scroll_id) do
+        nil -> 0
+        state -> Map.get(state, :scroll_offset_y, 0)
+      end
+
+    viewport_height = scrollable_rect.height
+
     {updated_hierarchy, final_counter, _} =
-      Enum.reduce(Enum.with_index(scrollable_children), {hierarchy, start_counter, 0}, fn {child,
-                                                                                           _idx},
-                                                                                          {h,
-                                                                                           counter,
-                                                                                           virtual_y} ->
+      Enum.reduce(scrollable_children, {hierarchy, start_counter, 0}, fn child,
+                                                                          {h, counter, virtual_y} ->
         child_height = get_preferred_height(child, h)
 
-        child_rect = %{
-          x: scrollable_rect.x,
-          y: scrollable_rect.y + virtual_y,
-          width: scrollable_rect.width,
-          height: child_height
-        }
+        below_viewport = virtual_y >= scroll_offset_y + viewport_height
+        above_viewport = virtual_y + child_height <= scroll_offset_y
 
-        {new_h, new_counter} =
-          render_component(h, child, child_rect, theme, app_state, scroll_id, counter, app_module)
+        if below_viewport or above_viewport do
+          {h, counter + count_component_slots(child), virtual_y + child_height}
+        else
+          child_rect = %{
+            x: scrollable_rect.x,
+            y: scrollable_rect.y + virtual_y,
+            width: scrollable_rect.width,
+            height: child_height
+          }
 
-        {new_h, new_counter, virtual_y + child_height}
+          {new_h, new_counter} =
+            render_component(h, child, child_rect, theme, app_state, scroll_id, counter, app_module)
+
+          {new_h, new_counter, virtual_y + child_height}
+        end
       end)
 
     {updated_hierarchy, final_counter} =
@@ -2779,4 +2791,22 @@ defmodule Drafter.ComponentRenderer do
   end
 
   defp estimate_collapsible_height(_state), do: 2
+
+  defp count_component_slots({:layout, _dir, children, _opts}) do
+    Enum.sum(Enum.map(children, &count_component_slots/1))
+  end
+
+  defp count_component_slots({:scrollable, children, _opts}) do
+    1 + Enum.sum(Enum.map(children, &count_component_slots/1))
+  end
+
+  defp count_component_slots({:box, children, _opts}) do
+    1 + Enum.sum(Enum.map(List.wrap(children), &count_component_slots/1))
+  end
+
+  defp count_component_slots({:card, children, _opts}) do
+    1 + Enum.sum(Enum.map(List.wrap(children), &count_component_slots/1))
+  end
+
+  defp count_component_slots(_), do: 1
 end
