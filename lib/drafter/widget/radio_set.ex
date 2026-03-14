@@ -112,11 +112,16 @@ defmodule Drafter.Widget.RadioSet do
           state.selected_index
       end
 
+    new_highlighted_index =
+      if new_selected_index != state.selected_index,
+        do: new_selected_index,
+        else: state.highlighted_index
+
     %{
       state
       | options: new_options,
         selected_index: new_selected_index,
-        highlighted_index: new_selected_index,
+        highlighted_index: new_highlighted_index,
         on_change: Map.get(props, :on_change, state.on_change),
         visible_height: Map.get(props, :visible_height, state.visible_height)
     }
