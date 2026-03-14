@@ -94,7 +94,32 @@ defmodule Drafter.Widget.RadioSet do
   end
 
   def update(props, state) do
-    Map.merge(state, props)
+    raw_options = Map.get(props, :options)
+    new_options = if raw_options, do: normalize_options(raw_options), else: state.options
+
+    new_selected_index =
+      cond do
+        Map.has_key?(props, :selected) ->
+          selected = props.selected
+
+          Enum.find_index(new_options, fn %{id: id} -> id == selected end) ||
+            state.selected_index
+
+        raw_options ->
+          min(state.selected_index, length(new_options) - 1)
+
+        true ->
+          state.selected_index
+      end
+
+    %{
+      state
+      | options: new_options,
+        selected_index: new_selected_index,
+        highlighted_index: new_selected_index,
+        on_change: Map.get(props, :on_change, state.on_change),
+        visible_height: Map.get(props, :visible_height, state.visible_height)
+    }
   end
 
   def handle_event(event, state) do
