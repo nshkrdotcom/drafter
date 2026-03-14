@@ -879,7 +879,7 @@ defmodule Drafter.Widget.Chart do
 
   defp format_axis_value(val) when is_float(val) do
     cond do
-      abs(val) >= 1000 -> Float.round(val / 1000, 1) |> Kernel.<>("k")
+      abs(val) >= 1000 -> "#{Float.round(val / 1000, 1)}k"
       abs(val) >= 1 -> Float.round(val, 1) |> to_string()
       true -> Float.round(val, 3) |> to_string()
     end
