@@ -7,22 +7,41 @@ defmodule Drafter.Widget.Collapsible do
   state. The `:on_toggle` callback is invoked with the new boolean state after
   each toggle.
 
-  Content can be a string (word-wrapped to fit the width) or a list of widget
-  descriptors rendered via the layout engine. When using widget descriptors,
-  provide `:content_height` to control the expanded height.
+  Content can be a plain string (word-wrapped to fit the available width) or a
+  list of child widgets built with the same helper functions available in
+  `Drafter.App` (e.g. `checkbox/2`, `radio_set/2`, `text_input/1`). Child
+  widgets are fully interactive — they receive focus, keyboard, and mouse events
+  just like top-level widgets. Use `:content_height` to reserve the right number
+  of rows for the expanded body when passing child widgets.
 
   ## Options
 
     * `:title` - header text shown in the toggle row (default `"Collapsible"`)
-    * `:content` - body text string or list of widget descriptors (default `""`)
-    * `:content_height` - number of rows for the expanded body when content is a widget list (default `10`)
+    * `:content` - body string or list of child widget descriptors (default `""`)
+    * `:content_height` - number of rows reserved for child widgets when expanded;
+      ignored for string content (default `10`)
     * `:expanded` - initial expansion state: `true` / `false` (default)
     * `:on_toggle` - one-arity callback invoked with the new `expanded` boolean
 
   ## Usage
 
-      collapsible("Details", "Full description here...")
-      collapsible("Options", [checkbox("Enable feature", id: :feat), checkbox("Debug mode", id: :dbg)], content_height: 5)
+      collapsible("About", "Plain text is word-wrapped automatically.")
+
+      collapsible(
+        "Preferences",
+        [
+          checkbox("Enable notifications", id: :notifs, checked: state.notifs, on_change: :notifs_changed),
+          checkbox("Dark mode", id: :dark, checked: state.dark, on_change: :dark_changed)
+        ],
+        content_height: 2
+      )
+
+      collapsible(
+        "Theme",
+        [radio_set([{"Light", "light"}, {"Dark", "dark"}], id: :theme, selected: state.theme, on_change: :theme_changed)],
+        content_height: 2,
+        expanded: true
+      )
   """
 
   use Drafter.Widget,
