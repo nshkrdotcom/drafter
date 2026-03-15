@@ -4,8 +4,9 @@ defmodule Drafter.Widget.Chart do
 
   Supported chart types: `:line`, `:area`, `:bar`, `:clustered_bar`, `:stacked_bar`,
   `:range_bar`, `:scatter`, and `:candlestick`. Braille-dot rendering provides the
-  highest resolution (two data points per column, four per row). Bar charts use
-  half-block characters for 2× vertical resolution.
+  highest resolution (two data points per column, four per row). Quadrant-block
+  rendering provides 2×2 pixel resolution per cell (coarser but larger dots). Bar
+  charts use half-block characters for 2× vertical resolution.
 
   Scatter data points accept `[x, y]` lists or `{x, y}` tuples.
   Candlestick candles accept `[open, high, low, close]` lists or maps with
@@ -67,6 +68,7 @@ defmodule Drafter.Widget.Chart do
     * `:chart_type` — `:line` (default), `:area`, `:bar`, `:clustered_bar`,
       `:stacked_bar`, `:range_bar`, `:scatter`, `:candlestick`
     * `:marker` — render density: `:braille` (default), `:half_block`, `:block`, `:dot`
+    * `:pixel_style` — pixel rendering style for line and scatter: `:braille` (default) or `:quadrant`
     * `:min_value` — explicit Y minimum; auto-detected when omitted
     * `:max_value` — explicit Y maximum; auto-detected when omitted
     * `:color` — `{r, g, b}` primary colour for single-series charts
@@ -124,10 +126,30 @@ defmodule Drafter.Widget.Chart do
   ]
   @type marker :: :braille | :half_block | :block | :dot
 
+  @quadrant_chars %{
+    0 => " ",
+    1 => "▘",
+    2 => "▝",
+    3 => "▀",
+    4 => "▖",
+    5 => "▌",
+    6 => "▚",
+    7 => "▛",
+    8 => "▗",
+    9 => "▞",
+    10 => "▐",
+    11 => "▜",
+    12 => "▄",
+    13 => "▙",
+    14 => "▟",
+    15 => "█"
+  }
+
   defstruct [
     :data,
     :chart_type,
     :marker,
+    :pixel_style,
     :min_value,
     :max_value,
     :width,
@@ -182,6 +204,7 @@ defmodule Drafter.Widget.Chart do
       data: data,
       chart_type: Map.get(props, :chart_type, :line),
       marker: Map.get(props, :marker, :braille),
+      pixel_style: Map.get(props, :pixel_style, :braille),
       min_value: min_val,
       max_value: max_val,
       width: Map.get(props, :width),
@@ -358,6 +381,7 @@ defmodule Drafter.Widget.Chart do
       | data: new_data,
         chart_type: Map.get(props, :chart_type, state.chart_type),
         marker: Map.get(props, :marker, state.marker),
+        pixel_style: Map.get(props, :pixel_style, state.pixel_style),
         min_value: min_val,
         max_value: max_val,
         height: Map.get(props, :height, state.height),
@@ -500,7 +524,10 @@ defmodule Drafter.Widget.Chart do
 
         lines = bresenham_lines(points)
 
-        render_braille_pixels(lines, width, height, bg, fg)
+        case state.pixel_style do
+          :quadrant -> render_quadrant_pixels(lines, width, height, bg, fg)
+          _ -> render_braille_pixels(lines, width, height, bg, fg)
+        end
     end
   end
 
@@ -832,7 +859,10 @@ defmodule Drafter.Widget.Chart do
             {x - start_x, pixel_height - pixel_y - 1}
           end)
 
-        render_braille_pixels(pixels, width, height, bg, fg)
+        case state.pixel_style do
+          :quadrant -> render_quadrant_pixels(pixels, width, height, bg, fg)
+          _ -> render_braille_pixels(pixels, width, height, bg, fg)
+        end
     end
   end
 
@@ -1140,6 +1170,43 @@ defmodule Drafter.Widget.Chart do
               braille_char(0)
             end
 
+          Segment.new(char, %{fg: fg, bg: bg})
+        end
+
+      Strip.new(segments)
+    end
+  end
+
+  defp render_quadrant_pixels(pixels, width, height, bg, fg) do
+    pixel_height = height * 2
+
+    pixels_by_char =
+      pixels
+      |> Enum.filter(fn {x, y} -> x >= 0 and x < width * 2 and y >= 0 and y < pixel_height end)
+      |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 2)} end)
+
+    for row <- 0..(height - 1) do
+      segments =
+        for col <- 0..(width - 1) do
+          char_pixels = Map.get(pixels_by_char, {col, row}, [])
+
+          bits =
+            Enum.reduce(char_pixels, 0, fn {x, y}, acc ->
+              local_x = rem(x, 2)
+              local_y = rem(y, 2)
+
+              bit =
+                case {local_x, local_y} do
+                  {0, 0} -> 1
+                  {1, 0} -> 2
+                  {0, 1} -> 4
+                  {1, 1} -> 8
+                end
+
+              acc ||| bit
+            end)
+
+          char = Map.get(@quadrant_chars, bits, " ")
           Segment.new(char, %{fg: fg, bg: bg})
         end
 

@@ -1285,11 +1285,20 @@ defmodule Drafter.ComponentRenderer do
         align = Keyword.get(opts, :align, :left)
         size = Keyword.get(opts, :size, :large)
 
+        bg_data = Keyword.get(opts, :bg_data)
+        color = Keyword.get(opts, :color, {0, 150, 255})
+        bg_min = Keyword.get(opts, :bg_min, 0)
+        bg_max = Keyword.get(opts, :bg_max)
+
         mount_props = %{
           text: text,
           style: custom_style,
           align: align,
-          size: size
+          size: size,
+          bg_data: bg_data,
+          color: color,
+          bg_min: bg_min,
+          bg_max: bg_max
         }
 
         new_hierarchy =
@@ -1297,7 +1306,7 @@ defmodule Drafter.ComponentRenderer do
             hierarchy
             |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
-            |> WidgetHierarchy.update_widget(widget_id, %{text: text, size: size})
+            |> WidgetHierarchy.update_widget(widget_id, %{text: text, size: size, bg_data: bg_data, color: color, bg_min: bg_min, bg_max: bg_max})
           else
             WidgetHierarchy.add_widget(
               hierarchy,

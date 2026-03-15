@@ -3,6 +3,12 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.17] - 2026-03-15
+### Added
+- `Digits`: `bg_data:` prop renders a braille line chart (4× vertical resolution per terminal row) behind the digit glyphs; `color:` sets the line colour; digits take priority where glyphs overlap braille dots
+- `Sparkline`: `orientation: :horizontal` renders each data point as a left-to-right bar using left-aligned eighth-block characters (`▏▎▍▌▋▊▉█`)
+- `Chart`: `pixel_style: :quadrant` option for line and scatter charts — uses quadrant block characters (`▖▗▘▝▚▞▛▜▟▙▀▄▌▐█`) at 2×2 pixel resolution per cell, giving larger/more visible dots than braille
+
 ## [0.1.16] - 2026-03-15
 ### Changed
 - `Digits`: improved `B` glyph in both large and small sizes — more distinguishable from `8` and `6`; large uses flat `├` spine with `╲`/`╱` bump sides, small uses `╲` divider in the middle row

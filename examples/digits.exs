@@ -17,11 +17,18 @@ defmodule DigitsShowcase do
     {1_500, :compact, "compact(1_500)"}
   ]
 
+  @stat_panels [
+    %{label: "CPU 91% — line high", value: "91.4%", color: {220, 80, 80}, bg_min: 0, bg_max: 100,
+      history: [72, 78, 80, 85, 82, 88, 90, 87, 91, 90, 93, 91]},
+    %{label: "Memory 8.2GB — mid", value: "8.2GB", color: {80, 140, 220}, bg_min: 0, bg_max: 16,
+      history: [6.1, 6.4, 6.8, 7.0, 7.2, 7.5, 7.8, 7.9, 8.0, 8.1, 8.2, 8.2]},
+    %{label: "Uptime 16% — line low", value: "16.0%", color: {80, 200, 120}, bg_min: 0, bg_max: 100,
+      history: [13, 14, 12, 15, 14, 16, 15, 17, 15, 16, 15, 16]}
+  ]
+
   def mount(_props) do
     formatted = Enum.map(@metrics, fn {value, fmt, _desc} -> format(value, fmt) end)
-    options = Enum.map(Enum.with_index(@metrics), fn {{_v, _f, desc}, i} ->
-      {desc, i}
-    end)
+    options = Enum.map(Enum.with_index(@metrics), fn {{_v, _f, desc}, i} -> {desc, i} end)
     %{selected: 0, formatted: formatted, options: options}
   end
 
@@ -54,9 +61,27 @@ defmodule DigitsShowcase do
         gap: 2
       ),
       rule(title: desc, title_align: :left),
-      option_list(state.options,
-        on_select: :metric_selected,
-        height: 10
+      option_list(state.options, on_select: :metric_selected, height: 8),
+      rule(title: "bg_data — area chart composite", title_align: :left),
+      horizontal(
+        Enum.map(@stat_panels, fn %{label: label, value: value, color: color, bg_min: bg_min, bg_max: bg_max, history: history} ->
+          vertical(
+            [
+              label(label, style: %{bold: true}, align: :center),
+              digits(value,
+                size: :large,
+                align: :center,
+                bg_data: history,
+                color: color,
+                bg_min: bg_min,
+                bg_max: bg_max
+              )
+            ],
+            flex: 1
+          )
+        end),
+        gap: 1,
+        height: 12
       ),
       footer()
     ])
@@ -75,6 +100,7 @@ defmodule DigitsShowcase do
   defp format(value, :bytes), do: Format.bytes(value)
   defp format(value, :percent_ratio), do: Format.percent(value, as_ratio: true, decimals: 1)
   defp format(value, :percent), do: Format.percent(value, decimals: 1)
+
 end
 
 Drafter.run(DigitsShowcase)

@@ -108,7 +108,9 @@ defmodule Drafter.Widget.Digits do
       align: Map.get(props, :align, :left),
       size: Map.get(props, :size, :large),
       bg_data: Map.get(props, :bg_data),
-      color: Map.get(props, :color, {0, 150, 255})
+      color: Map.get(props, :color, {0, 150, 255}),
+      bg_min: Map.get(props, :bg_min, 0),
+      bg_max: Map.get(props, :bg_max)
     }
   end
 
@@ -133,11 +135,30 @@ defmodule Drafter.Widget.Digits do
     {:noreply, state}
   end
 
+  @braille_base 0x2800
+  @braille_dot_offsets %{
+    {0, 0} => 0x01,
+    {0, 1} => 0x02,
+    {0, 2} => 0x04,
+    {0, 3} => 0x40,
+    {1, 0} => 0x08,
+    {1, 1} => 0x10,
+    {1, 2} => 0x20,
+    {1, 3} => 0x80
+  }
+
   defp render_with_bg(digits, data, state, rect) do
     {patterns, digit_height} =
       if state.size == :small, do: {@small_patterns, 3}, else: {@large_patterns, 5}
 
-    glyph_width = digits |> Enum.map(&(Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length())) |> Enum.sum()
+    computed = Computed.for_widget(:digits, state, style: state.style)
+    effective_style = Computed.to_segment_style(computed)
+    digit_fg = Map.get(effective_style, :fg)
+
+    glyph_width =
+      digits
+      |> Enum.map(&(Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length()))
+      |> Enum.sum()
 
     left_offset =
       case state.align do
@@ -146,39 +167,62 @@ defmodule Drafter.Widget.Digits do
         _ -> 0
       end
 
-    top_offset = div(rect.height - digit_height, 2) |> max(0)
+    top_offset = max(0, div(rect.height - digit_height, 2))
+    glyph_map = build_glyph_map(digits, patterns, left_offset, top_offset)
 
-    glyph_map = build_glyph_map(digits, patterns, digit_height, left_offset, top_offset)
+    pixel_width = rect.width * 2
+    pixel_height = rect.height * 4
+    sampled = sample_data(data, pixel_width)
+    min_val = state.bg_min || 0
+    max_val = state.bg_max || Enum.max(sampled, fn -> 1 end)
+    range = max(max_val - min_val, 1)
 
-    fill_color = state.color
-    fg_color = contrasting_fg(fill_color)
-    chart_matrix = build_chart_matrix(data, rect.width, rect.height)
+    line_pixels =
+      Enum.with_index(sampled, fn v, x ->
+        y_norm = (v - min_val) / range * (pixel_height - 1)
+        y = y_norm |> round() |> min(pixel_height - 1) |> max(0)
+        {x, pixel_height - 1 - y}
+      end)
+
+    braille_map =
+      line_pixels
+      |> Enum.filter(fn {x, y} -> x >= 0 and x < pixel_width and y >= 0 and y < pixel_height end)
+      |> Enum.group_by(fn {x, y} -> {div(x, 2), div(y, 4)} end)
+      |> Map.new(fn {{cx, cy}, pixels} ->
+        bits =
+          Enum.reduce(pixels, 0, fn {x, y}, acc ->
+            acc + Map.get(@braille_dot_offsets, {rem(x, 2), rem(y, 4)}, 0)
+          end)
+
+        {{cx, cy}, <<@braille_base + bits::utf8>>}
+      end)
+
+    line_color = state.color
 
     Enum.map(0..(rect.height - 1), fn row ->
       segments =
         Enum.map(0..(rect.width - 1), fn col ->
-          in_fill = chart_matrix |> Enum.at(col, 0) > rect.height - 1 - row
-          bg = if in_fill, do: fill_color, else: nil
           glyph_char = Map.get(glyph_map, {row, col})
+          braille = Map.get(braille_map, {col, row})
 
-          {char, fg} =
-            if glyph_char && glyph_char != " " do
-              {glyph_char, fg_color}
-            else
-              {" ", nil}
-            end
+          cond do
+            glyph_char && glyph_char != " " ->
+              Segment.new(glyph_char, if(digit_fg, do: %{fg: digit_fg}, else: %{}))
 
-          style = %{}
-          style = if bg, do: Map.put(style, :bg, bg), else: style
-          style = if fg, do: Map.put(style, :fg, fg), else: style
-          Segment.new(char, style)
+            braille ->
+              Segment.new(braille, %{fg: line_color})
+
+            true ->
+              Segment.new(" ", %{})
+          end
         end)
 
       Strip.new(segments)
     end)
   end
 
-  defp build_glyph_map(digits, patterns, _digit_height, left_offset, top_offset) do
+
+  defp build_glyph_map(digits, patterns, left_offset, top_offset) do
     digits
     |> Enum.reduce({%{}, left_offset}, fn digit, {map, col_offset} ->
       pattern = Map.get(patterns, digit, patterns[" "])
@@ -201,36 +245,22 @@ defmodule Drafter.Widget.Digits do
     |> elem(0)
   end
 
-  defp build_chart_matrix(data, width, height) do
-    sampled = sample_data(data, width)
-    max_val = Enum.max(sampled, fn -> 1 end)
-    min_val = Enum.min(sampled, fn -> 0 end)
-    range = max(max_val - min_val, 1)
-
-    Enum.map(sampled, fn v ->
-      round((v - min_val) / range * height)
-    end)
-  end
-
-  defp sample_data(data, width) when length(data) == width, do: data
-
-  defp sample_data(data, width) when length(data) > width do
-    len = length(data)
-    Enum.map(0..(width - 1), fn i ->
-      idx = round(i * (len - 1) / max(width - 1, 1))
-      Enum.at(data, idx)
-    end)
-  end
 
   defp sample_data(data, width) do
-    pad = width - length(data)
-    List.duplicate(0, pad) ++ data
+    len = length(data)
+
+    cond do
+      len == 0 -> List.duplicate(0, width)
+      len == width -> data
+      true ->
+        Enum.map(0..(width - 1), fn i ->
+          idx = round(i * (len - 1) / max(width - 1, 1))
+          Enum.at(data, idx)
+        end)
+    end
   end
 
-  defp contrasting_fg({r, g, b}) do
-    luminance = 0.299 * r + 0.587 * g + 0.114 * b
-    if luminance > 140, do: {0, 0, 0}, else: {255, 255, 255}
-  end
+
 
   defp render_digits(digits, state, rect) do
     computed = Computed.for_widget(:digits, state, style: state.style)

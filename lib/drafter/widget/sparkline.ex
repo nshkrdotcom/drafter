@@ -1,12 +1,15 @@
 defmodule Drafter.Widget.Sparkline do
   @moduledoc """
-  Renders a compact single-row sparkline chart using Unicode block characters.
+  Renders a compact sparkline chart using Unicode block characters.
 
   Each data point maps to one of the nine bar heights `▁▂▃▄▅▆▇█` (or a blank
   for the minimum). When `:min_color` and `:max_color` differ, individual bars
   are coloured by linear interpolation between those two colours based on their
   normalised value. An optional summary appends `min:X max:Y avg:Z` text to the
   right of the bars.
+
+  When `orientation: :horizontal` is set, each data point becomes one row and
+  bars grow left-to-right using left-aligned eighth-block characters.
 
   ## Options
 
@@ -17,6 +20,7 @@ defmodule Drafter.Widget.Sparkline do
     * `:min_color` - `{r, g, b}` colour for the lowest bars (falls back to `:color`)
     * `:max_color` - `{r, g, b}` colour for the highest bars (falls back to `:color`)
     * `:summary` - show `min/max/avg` summary at the right edge: `true` / `false` (default)
+    * `:orientation` - `:vertical` (default) or `:horizontal`
     * `:style` - map of style properties
     * `:classes` - list of theme class atoms
 
@@ -24,6 +28,7 @@ defmodule Drafter.Widget.Sparkline do
 
       sparkline(data: [1, 3, 2, 8, 5, 9, 4], summary: true)
       sparkline(data: readings, min_color: {100, 200, 100}, max_color: {255, 50, 50})
+      sparkline(data: readings, orientation: :horizontal)
   """
 
   use Drafter.Widget
@@ -43,6 +48,8 @@ defmodule Drafter.Widget.Sparkline do
     {"█", 8}
   ]
 
+  @horizontal_blocks [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
+
   defstruct [
     :data,
     :min_value,
@@ -53,7 +60,8 @@ defmodule Drafter.Widget.Sparkline do
     :color,
     :min_color,
     :max_color,
-    :summary
+    :summary,
+    :orientation
   ]
 
   @impl Drafter.Widget
@@ -75,6 +83,7 @@ defmodule Drafter.Widget.Sparkline do
       min_color: Map.get(props, :min_color),
       max_color: Map.get(props, :max_color),
       summary: Map.get(props, :summary, false),
+      orientation: Map.get(props, :orientation, :vertical),
       style: Map.get(props, :style, %{}),
       classes: Map.get(props, :classes, []),
       app_module: Map.get(props, :app_module)
@@ -102,43 +111,47 @@ defmodule Drafter.Widget.Sparkline do
     min_color = state.min_color || default_color
     max_color = state.max_color || default_color
 
-    summary_style = %{fg: {150, 150, 150}, bg: bg}
+    if state.orientation == :horizontal do
+      render_horizontal(state, rect, bg, min_color, max_color)
+    else
+      summary_style = %{fg: {150, 150, 150}, bg: bg}
 
-    spark_width = if state.summary, do: rect.width - 20, else: rect.width
+      spark_width = if state.summary, do: rect.width - 20, else: rect.width
 
-    {sparkline_chars, normalized_values} =
-      render_sparkline_with_values(state.data, state.min_value, state.max_value, spark_width)
+      {sparkline_chars, normalized_values} =
+        render_sparkline_with_values(state.data, state.min_value, state.max_value, spark_width)
 
-    spark_segments =
-      sparkline_chars
-      |> String.graphemes()
-      |> Enum.zip(normalized_values)
-      |> Enum.map(fn {char, normalized} ->
-        interpolated_color = interpolate_color(min_color, max_color, normalized)
-        Segment.new(char, %{fg: interpolated_color, bg: bg})
-      end)
+      spark_segments =
+        sparkline_chars
+        |> String.graphemes()
+        |> Enum.zip(normalized_values)
+        |> Enum.map(fn {char, normalized} ->
+          interpolated_color = interpolate_color(min_color, max_color, normalized)
+          Segment.new(char, %{fg: interpolated_color, bg: bg})
+        end)
 
-    output =
-      if state.summary and length(state.data) > 0 do
-        summary_text = render_summary(state.data, state.min_value, state.max_value)
+      output =
+        if state.summary and length(state.data) > 0 do
+          summary_text = render_summary(state.data, state.min_value, state.max_value)
 
-        padding_width =
-          max(0, rect.width - String.length(sparkline_chars) - String.length(summary_text))
+          padding_width =
+            max(0, rect.width - String.length(sparkline_chars) - String.length(summary_text))
 
-        summary_padding = String.duplicate(" ", padding_width)
+          summary_padding = String.duplicate(" ", padding_width)
 
-        spark_segments ++
-          [
-            Segment.new(summary_padding, %{fg: default_color, bg: bg}),
-            Segment.new(summary_text, summary_style)
-          ]
-      else
-        padding_width = max(0, rect.width - String.length(sparkline_chars))
-        padding = String.duplicate(" ", padding_width)
-        spark_segments ++ [Segment.new(padding, %{fg: default_color, bg: bg})]
-      end
+          spark_segments ++
+            [
+              Segment.new(summary_padding, %{fg: default_color, bg: bg}),
+              Segment.new(summary_text, summary_style)
+            ]
+        else
+          padding_width = max(0, rect.width - String.length(sparkline_chars))
+          padding = String.duplicate(" ", padding_width)
+          spark_segments ++ [Segment.new(padding, %{fg: default_color, bg: bg})]
+        end
 
-    [Strip.new(output)]
+      [Strip.new(output)]
+    end
   end
 
   @impl Drafter.Widget
@@ -170,10 +183,50 @@ defmodule Drafter.Widget.Sparkline do
         min_color: Map.get(props, :min_color, state.min_color),
         max_color: Map.get(props, :max_color, state.max_color),
         summary: Map.get(props, :summary, state.summary),
+        orientation: Map.get(props, :orientation, state.orientation),
         style: Map.get(props, :style, state.style),
         classes: Map.get(props, :classes, state.classes),
         app_module: Map.get(props, :app_module, state.app_module)
     }
+  end
+
+  defp render_horizontal(state, rect, bg, min_color, max_color) do
+    data = state.data
+    min_val = state.min_value
+    max_val = state.max_value
+    range = max_val - min_val
+
+    data
+    |> Enum.take(rect.height)
+    |> Enum.map(fn value ->
+      normalized =
+        if range > 0 do
+          (value - min_val) / range
+        else
+          0.5
+        end
+
+      total_eighths = round(normalized * rect.width * 8)
+      full_blocks = div(total_eighths, 8)
+      remainder = rem(total_eighths, 8)
+
+      full_str = String.duplicate("█", full_blocks)
+
+      partial_str =
+        if remainder > 0 and full_blocks < rect.width do
+          Enum.at(@horizontal_blocks, remainder)
+        else
+          ""
+        end
+
+      bar_len = full_blocks + if(remainder > 0 and full_blocks < rect.width, do: 1, else: 0)
+      padding = String.duplicate(" ", max(0, rect.width - bar_len))
+
+      bar_text = full_str <> partial_str <> padding
+
+      interpolated_color = interpolate_color(min_color, max_color, normalized)
+      Strip.new([Segment.new(bar_text, %{fg: interpolated_color, bg: bg})])
+    end)
   end
 
   def render_sparkline_with_values(data, min_val, max_val, width) do
