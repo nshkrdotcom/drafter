@@ -558,14 +558,14 @@ defmodule Drafter.Widget.DataTable do
   defp action_cursor_up(state) do
     case find_previous_enabled(state.data, get_highlighted_index(state)) do
       nil -> {:ok, state, []}
-      new_index -> change_selection(state, new_index, true)
+      new_index -> change_selection(state, new_index, false)
     end
   end
 
   defp action_cursor_down(state) do
     case find_next_enabled(state.data, get_highlighted_index(state)) do
       nil -> {:ok, state, []}
-      new_index -> change_selection(state, new_index, true)
+      new_index -> change_selection(state, new_index, false)
     end
   end
 

@@ -6,6 +6,7 @@ Versions marked with ★ were published to Hex.pm.
 ## [0.1.18] - 2026-03-15
 ### Fixed
 - `DataTable`: click and Enter now toggle selection in both `:single` and `:multiple` modes — clicking or pressing Enter on an already-selected row deselects it; previously `change_selection/3` always set selection, while Space already toggled correctly via `action_toggle_selection`
+- `DataTable`: arrow key navigation no longer inadvertently toggles selection in `:multiple` mode — `action_cursor_up/down` now pass `trigger_select: false` so moving the cursor never changes the selected set; only Enter, Space, and click change selection
 - `Collapsible`: hidden children no longer receive mouse events — `find_widget_at` now excludes `hidden_widgets` from hit testing, preventing clicks intended for widgets beneath a collapsed section (e.g. a `DataTable` header) from being intercepted by invisible child widgets
 - `Collapsible`: widget content (list) no longer renders over siblings below it — two root causes fixed:
   - `Collapsible.update/2` was resetting `content_height` to the default (10) on every re-render when only `content` was passed in `updated_props`, corrupting the stored height after the first render
