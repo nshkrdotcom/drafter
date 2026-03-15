@@ -20,7 +20,7 @@ defmodule Drafter.Widget.DataTable do
     * `:width` — column width in characters, or `:auto` (default: `:auto`)
     * `:align` — cell alignment: `:left` (default), `:center`, or `:right`
     * `:sortable` — whether clicking the header sorts by this column (default: `true`)
-    * `:color_fn` — `(raw_value -> {r,g,b} | nil)` applied to cell background when not selected
+    * `:color_fn` — `(raw_value -> {r,g,b} | %{bg: {r,g,b}, fg: {r,g,b}} | nil)` applied to cell colours when not selected
 
   Shorthand forms are also accepted: `{:key, "Label"}` or just `:key`.
 
@@ -148,7 +148,7 @@ defmodule Drafter.Widget.DataTable do
           width: pos_integer() | :auto,
           align: :left | :center | :right,
           sortable: boolean(),
-          color_fn: (term() -> {byte(), byte(), byte()} | nil) | nil
+          color_fn: (term() -> {byte(), byte(), byte()} | %{bg: tuple(), fg: tuple()} | nil) | nil
         }
 
   @type row :: map()
@@ -967,6 +967,7 @@ defmodule Drafter.Widget.DataTable do
                 f ->
                   case f.(raw_value) do
                     nil -> base_style
+                    %{bg: bg, fg: fg} -> base_style |> Map.put(:bg, bg) |> Map.put(:fg, fg)
                     color -> Map.put(base_style, :bg, color)
                   end
               end
