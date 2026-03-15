@@ -4,8 +4,8 @@ defmodule Drafter.Widget.DataTable do
 
   Rows are provided as a list of maps. Each map key corresponds to a column `:key`. Data can be
   pre-sorted at mount time via `:sort_by`. Users can sort any sortable column by clicking its
-  header, toggling between ascending and descending on repeated clicks. Sort direction is
-  indicated by `↑` or `↓` in the header.
+  header, cycling through ascending → descending → unsorted. Sort direction is indicated by `↑`
+  or `↓` in the header; `↕` appears on all sortable columns that are not currently sorted.
 
   An optional vertical scrollbar is rendered in the rightmost column when the number of rows
   exceeds the visible area. The scrollbar supports click-to-jump and drag-to-scroll. Zebra
@@ -20,6 +20,7 @@ defmodule Drafter.Widget.DataTable do
     * `:width` — column width in characters, or `:auto` (default: `:auto`)
     * `:align` — cell alignment: `:left` (default), `:center`, or `:right`
     * `:sortable` — whether clicking the header sorts by this column (default: `true`)
+    * `:color_fn` — `(raw_value -> {r,g,b} | nil)` applied to cell background when not selected
 
   Shorthand forms are also accepted: `{:key, "Label"}` or just `:key`.
 
@@ -42,6 +43,7 @@ defmodule Drafter.Widget.DataTable do
     * `:width` - widget width in columns (default: `80`)
     * `:height` - widget height in rows (default: `20`)
     * `:fixed_columns` - number of left-most columns that do not scroll horizontally (default: `0`)
+    * `:sortable` - enable/disable column sorting and sort indicators for the entire table (default: `true`)
 
   ## Key bindings
 
@@ -51,7 +53,7 @@ defmodule Drafter.Widget.DataTable do
     * `Page Up` / `Page Down` — jump by viewport height
     * `Enter` — select the highlighted row and call `:on_select`
     * `Space` — toggle selection in `:multiple` mode; otherwise same as Enter
-    * Mouse click on header — sort by that column (toggles asc/desc)
+    * Mouse click on header — sort by that column (cycles through ascending → descending → unsorted)
     * Mouse click on row — select the row
     * Mouse scroll — move cursor row (or scroll viewport when `:mouse_scroll_moves_selection` is `false`)
     * Scrollbar click/drag — jump or drag the viewport position
@@ -103,17 +105,21 @@ defmodule Drafter.Widget.DataTable do
     :viewport_height,
     :fixed_columns,
     :fixed_col_widths,
-    # Direct scrolling fields (like OptionList)
     :highlighted_index,
     :selected_indices,
     :scroll_offset,
     :selection_mode,
     :mouse_scroll_moves_selection,
     :mouse_scroll_selects_item,
-    # Drag state for scrollbar
     :dragging_scrollbar,
-    # Mouse hover tracking for scrollbar effects
-    :hovering_scrollbar
+    :hovering_scrollbar,
+    :sortable,
+    :resizable,
+    :_unsorted_data,
+    :_col_widths,
+    :_resize_col,
+    :_resize_start_x,
+    :_resize_start_width
   ]
 
   @type column :: %{
@@ -121,7 +127,8 @@ defmodule Drafter.Widget.DataTable do
           label: String.t(),
           width: pos_integer() | :auto,
           align: :left | :center | :right,
-          sortable: boolean()
+          sortable: boolean(),
+          color_fn: (term() -> {byte(), byte(), byte()} | nil) | nil
         }
 
   @type row :: map()
@@ -155,7 +162,9 @@ defmodule Drafter.Widget.DataTable do
           width: pos_integer(),
           height: pos_integer(),
           fixed_columns: non_neg_integer(),
-          fixed_col_widths: [pos_integer()]
+          fixed_col_widths: [pos_integer()],
+          sortable: boolean(),
+          resizable: boolean()
         }
 
   @impl Drafter.Widget
@@ -165,7 +174,6 @@ defmodule Drafter.Widget.DataTable do
     height = Map.get(props, :height, 20)
     selection_mode = Map.get(props, :selection_mode, :single)
 
-    # Sort initial data if sort column is provided
     {sorted_data, sort_col, sort_dir} =
       case Map.get(props, :sort_by) do
         {column, direction} when direction in [:asc, :desc] ->
@@ -178,10 +186,8 @@ defmodule Drafter.Widget.DataTable do
           {data, nil, :asc}
       end
 
-    # Calculate visible height for data (excluding header)
     _data_height = if Map.get(props, :show_header, true), do: height - 1, else: height
 
-    # Initialize scroll fields directly (like OptionList)
     highlighted_index = if length(sorted_data) > 0, do: 0, else: nil
     selected_indices = MapSet.new()
 
@@ -219,12 +225,19 @@ defmodule Drafter.Widget.DataTable do
       height: height,
       viewport_height: height,
       fixed_columns: min(fixed_columns, length(columns)),
-      fixed_col_widths: []
+      fixed_col_widths: [],
+      sortable: Map.get(props, :sortable, true),
+      resizable: Map.get(props, :resizable, true),
+      _unsorted_data: data,
+      _col_widths: nil,
+      _resize_col: nil,
+      _resize_start_x: nil,
+      _resize_start_width: nil
     }
   end
 
   def on_rect_change(rect, state) do
-    %{state | viewport_height: rect.height}
+    %{state | viewport_height: rect.height, width: rect.width}
   end
 
   @impl Drafter.Widget
@@ -244,7 +257,6 @@ defmodule Drafter.Widget.DataTable do
 
     data_height = get_data_height(normalized_state)
 
-    # Reserve space for vertical scrollbar if enabled and needed
     table_width =
       if normalized_state.show_scrollbars && length(normalized_state.data) > data_height do
         content_width - 1
@@ -252,18 +264,10 @@ defmodule Drafter.Widget.DataTable do
         content_width
       end
 
-    # Calculate column widths based on fit mode
-    column_widths =
-      calculate_column_widths(
-        normalized_state.columns,
-        table_width,
-        normalized_state.column_fit_mode,
-        normalized_state.data
-      )
+    column_widths = get_column_widths(normalized_state, table_width)
 
     strips = []
 
-    # Render header if enabled
     strips =
       if normalized_state.show_header do
         header_strip = render_header(normalized_state, column_widths, table_width)
@@ -272,11 +276,9 @@ defmodule Drafter.Widget.DataTable do
         strips
       end
 
-    # Get visible items directly (like OptionList)
     start_idx = normalized_state.scroll_offset
     visible_count = min(data_height, length(normalized_state.data) - start_idx)
 
-    # Render data rows
     data_strips =
       if visible_count > 0 do
         start_idx..(start_idx + visible_count - 1)
@@ -290,9 +292,6 @@ defmodule Drafter.Widget.DataTable do
 
     strips = Enum.reverse(strips) ++ data_strips
 
-    # Don't add scrollbar here - will be added after height padding
-
-    # Pad to full height
     current_height = length(strips)
 
     final_strips =
@@ -306,7 +305,6 @@ defmodule Drafter.Widget.DataTable do
         Enum.take(strips, content_height)
       end
 
-    # Add scrollbar to empty lines if needed
     if normalized_state.show_scrollbars && length(normalized_state.data) > data_height do
       add_vertical_scrollbar(final_strips, normalized_state, content_width, data_height)
     else
@@ -314,7 +312,21 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
+  def keybindings do
+    [
+      {"↑↓", "Scroll"},
+      {"Enter", "Select"},
+      {"+", "Widen col"},
+      {"-", "Narrow col"}
+    ]
+  end
+
   @impl Drafter.Widget
+  def handle_key(?+, state), do: resize_cursor_col(state, 2)
+  def handle_key(?-, state), do: resize_cursor_col(state, -2)
+  def handle_key(:+, state), do: resize_cursor_col(state, 2)
+  def handle_key(:-, state), do: resize_cursor_col(state, -2)
+
   def handle_key(:left, state) do
     if focused(state) do
       move_cursor_horizontal(state, :left)
@@ -358,12 +370,25 @@ defmodule Drafter.Widget.DataTable do
 
   @impl Drafter.Widget
   def handle_click(x, y, state) do
+    state = %{state | _resize_col: nil, _resize_start_x: nil, _resize_start_width: nil}
     handle_mouse_click(state, x, y)
   end
 
   @impl Drafter.Widget
   def handle_drag(x, y, state) do
-    handle_mouse_drag(state, x, y)
+    cond do
+      state._resize_col != nil ->
+        do_column_resize(state, x)
+
+      y == 0 and state.show_header and state.resizable ->
+        col = calculate_column_from_x(state, x)
+        widths = get_column_widths(state, state.width)
+        start_width = Enum.at(widths, col, 10)
+        {:ok, %{state | _resize_col: col, _resize_start_x: x, _resize_start_width: start_width, _col_widths: widths}}
+
+      true ->
+        handle_mouse_drag(state, x, y)
+    end
   end
 
   @impl Drafter.Widget
@@ -373,10 +398,15 @@ defmodule Drafter.Widget.DataTable do
 
   @impl Drafter.Widget
   def handle_custom_event({:mouse, %{type: :mouse_up, x: x, y: y}}, state) do
-    if state.dragging_scrollbar do
-      handle_mouse_release(state, x, y)
-    else
-      handle_mouse_click(state, x, y)
+    cond do
+      state._resize_col ->
+        {:ok, %{state | _resize_col: nil, _resize_start_x: nil, _resize_start_width: nil}}
+
+      state.dragging_scrollbar ->
+        handle_mouse_release(state, x, y)
+
+      true ->
+        handle_mouse_click(state, x, y)
     end
   end
 
@@ -384,10 +414,9 @@ defmodule Drafter.Widget.DataTable do
 
   @impl Drafter.Widget
   def update(props, state) do
-    # Handle data updates while preserving navigation state
     new_data = Map.get(props, :data, state.data)
+    new_columns = normalize_columns(Map.get(props, :columns, state.columns))
 
-    # Re-sort if data changed and we have an active sort
     sorted_data =
       if new_data != state.data && state.sort_column do
         sort_data(new_data, state.sort_column, state.sort_direction)
@@ -395,10 +424,8 @@ defmodule Drafter.Widget.DataTable do
         new_data
       end
 
-    # Update selection mode if changed
     new_selection_mode = Map.get(props, :selection_mode, state.selection_mode)
 
-    # Adjust highlighted index if it's now out of bounds
     max_row = max(0, length(sorted_data) - 1)
 
     adjusted_highlighted_index =
@@ -408,9 +435,11 @@ defmodule Drafter.Widget.DataTable do
         state.highlighted_index
       end
 
+    col_count_changed = length(new_columns) != length(state.columns)
+
     %{
       state
-      | columns: Map.get(props, :columns, state.columns) |> normalize_columns(),
+      | columns: new_columns,
         data: sorted_data,
         highlighted_index: adjusted_highlighted_index,
         selection_mode: new_selection_mode,
@@ -426,11 +455,13 @@ defmodule Drafter.Widget.DataTable do
         show_scrollbars: Map.get(props, :show_scrollbars, state.show_scrollbars),
         column_fit_mode: Map.get(props, :column_fit_mode, state.column_fit_mode),
         width: Map.get(props, :width, state.width),
-        height: Map.get(props, :height, state.height)
+        height: Map.get(props, :height, state.height),
+        sortable: Map.get(props, :sortable, state.sortable),
+        resizable: Map.get(props, :resizable, state.resizable),
+        _unsorted_data: if(Map.has_key?(props, :data), do: new_data, else: state._unsorted_data),
+        _col_widths: if(col_count_changed, do: nil, else: state._col_widths)
     }
   end
-
-  # Row navigation functions - Direct implementation like OptionList
 
   defp action_scroll_up(state) do
     if state.scroll_offset > 0 do
@@ -538,7 +569,6 @@ defmodule Drafter.Widget.DataTable do
 
         new_state = %{state | selected_indices: new_selected}
 
-        # Trigger selection callback if present
         actions =
           if state.on_select do
             selected_items =
@@ -565,7 +595,6 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
-  # Column navigation functions
   defp move_cursor_horizontal(%{cursor_col: col} = state, :left) when col > 0 do
     new_state = %{state | cursor_col: col - 1} |> adjust_scroll_horizontal()
     {:ok, new_state, [:render_update]}
@@ -581,7 +610,6 @@ defmodule Drafter.Widget.DataTable do
 
   defp move_cursor_horizontal(state, :right), do: {:noreply, state}
 
-  # Mouse handling
   defp handle_mouse_click(%{show_header: true} = state, x, 0) do
     handle_header_click(state, x)
   end
@@ -643,7 +671,6 @@ defmodule Drafter.Widget.DataTable do
 
   defp handle_mouse_drag(state, x, y) do
     if state.dragging_scrollbar do
-      # Handle scrollbar drag - continuous scrolling
       region = determine_click_region(state, x, y)
 
       case region do
@@ -652,7 +679,6 @@ defmodule Drafter.Widget.DataTable do
           data_height = get_data_height(state)
           relative_y = y - data_start_y
 
-          # Clamp relative_y to valid range
           relative_y = max(0, min(relative_y, data_height - 1))
 
           total_rows = length(state.data)
@@ -671,27 +697,22 @@ defmodule Drafter.Widget.DataTable do
           end
 
         _ ->
-          # Not dragging on scrollbar anymore, stop dragging
           {:ok, %{state | dragging_scrollbar: false}, [:render_update]}
       end
     else
-      # Ignore drag events that aren't associated with scrollbar dragging
       {:noreply, state}
     end
   end
 
   defp handle_mouse_release(state, _x, _y) do
-    # Stop dragging when mouse is released
     {:ok, %{state | dragging_scrollbar: false}, [:render_update]}
   end
 
   defp handle_mouse_move(state, x, y) do
-    # Track hover state for scrollbar visual feedback
     region = determine_click_region(state, x, y)
     hovering_scrollbar = region == :scrollbar
 
     if hovering_scrollbar != state.hovering_scrollbar do
-      # Hover state changed - re-render to show visual feedback
       {:ok, %{state | hovering_scrollbar: hovering_scrollbar}, [:render_update]}
     else
       {:noreply, state}
@@ -726,21 +747,24 @@ defmodule Drafter.Widget.DataTable do
     if col_index < length(state.columns) do
       column = Enum.at(state.columns, col_index)
 
-      if column.sortable do
-        direction =
-          if state.sort_column == column.key do
-            if state.sort_direction == :asc, do: :desc, else: :asc
-          else
-            :asc
-          end
+      if state.sortable && column.sortable do
+        {new_direction, new_data, new_sort_col} =
+          cond do
+            state.sort_column != column.key ->
+              {:asc, sort_data(state._unsorted_data, column.key, :asc), column.key}
 
-        sorted_data = sort_data(state.data, column.key, direction)
+            state.sort_direction == :asc ->
+              {:desc, sort_data(state._unsorted_data, column.key, :desc), column.key}
+
+            true ->
+              {:asc, state._unsorted_data, nil}
+          end
 
         new_state = %{
           state
-          | data: sorted_data,
-            sort_column: column.key,
-            sort_direction: direction,
+          | data: new_data,
+            sort_column: new_sort_col,
+            sort_direction: new_direction,
             cursor_col: col_index
         }
 
@@ -759,7 +783,6 @@ defmodule Drafter.Widget.DataTable do
 
     if total_rows > data_height do
       max_scroll = total_rows - data_height
-      # Use consistent math with visual rendering: (data_height - 1)
       scroll_range = max(1, data_height - 1)
       click_ratio = relative_y / scroll_range
       target_scroll = round(click_ratio * max_scroll)
@@ -778,8 +801,6 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
-  # Rendering functions
-
   defp render_header(state, column_widths, total_width) do
     segments =
       state.columns
@@ -787,21 +808,21 @@ defmodule Drafter.Widget.DataTable do
       |> Enum.with_index()
       |> Enum.map(fn {{column, width}, col_index} ->
         is_cursor_col = state.show_cursor && focused(state) && col_index == state.cursor_col
-        is_sort_col = column.key == state.sort_column
 
-        # Create header text with sort indicator
-        sort_indicator =
-          if is_sort_col do
-            case state.sort_direction do
-              :asc -> " ↑"
-              :desc -> " ↓"
-            end
+        {label_width, indicator} =
+          if state.sortable && column.sortable && width > 1 do
+            char =
+              cond do
+                column.key == state.sort_column && state.sort_direction == :asc -> "↑"
+                column.key == state.sort_column && state.sort_direction == :desc -> "↓"
+                true -> "↕"
+              end
+            {width - 1, char}
           else
-            ""
+            {width, ""}
           end
 
-        text = column.label <> sort_indicator
-        formatted_text = format_cell_content(text, width, column.align)
+        formatted_text = format_cell_content(column.label, label_width, column.align) <> indicator
 
         style =
           if is_cursor_col do
@@ -813,7 +834,6 @@ defmodule Drafter.Widget.DataTable do
         Segment.new(formatted_text, style)
       end)
 
-    # Pad to full width
     current_width = Enum.sum(column_widths)
 
     segments =
@@ -836,25 +856,33 @@ defmodule Drafter.Widget.DataTable do
       |> Enum.zip(column_widths)
       |> Enum.with_index()
       |> Enum.map(fn {{column, width}, _col_index} ->
-        # Get cell value
-        cell_value =
-          Map.get(row, column.key, "")
-          |> to_string()
+        raw_value = Map.get(row, column.key, "")
+        formatted_text = format_cell_content(to_string(raw_value), width, column.align)
 
-        formatted_text = format_cell_content(cell_value, width, column.align)
-
-        # Determine cell style: no per-column or row-level cursor highlight in rows
-        style =
+        base_style =
           cond do
             is_selected -> state.selected_style
             is_zebra -> Map.merge(state.style, %{bg: adjust_color(state.style.bg, -10)})
             true -> state.style
           end
 
+        style =
+          if not is_selected do
+            case Map.get(column, :color_fn) do
+              nil -> base_style
+              f ->
+                case f.(raw_value) do
+                  nil -> base_style
+                  color -> Map.put(base_style, :bg, color)
+                end
+            end
+          else
+            base_style
+          end
+
         Segment.new(formatted_text, style)
       end)
 
-    # Pad to full width
     current_width = Enum.sum(column_widths)
 
     segments =
@@ -868,18 +896,16 @@ defmodule Drafter.Widget.DataTable do
     Strip.new(segments)
   end
 
-  # Helper functions
-
   defp normalize_columns(columns) do
     Enum.map(columns, fn
       %{} = col ->
-        Map.merge(%{width: :auto, align: :left, sortable: true}, col)
+        Map.merge(%{width: :auto, align: :left, sortable: true, color_fn: nil}, col)
 
       {key, label} ->
-        %{key: key, label: label, width: :auto, align: :left, sortable: true}
+        %{key: key, label: label, width: :auto, align: :left, sortable: true, color_fn: nil}
 
       key when is_atom(key) ->
-        %{key: key, label: to_string(key), width: :auto, align: :left, sortable: true}
+        %{key: key, label: to_string(key), width: :auto, align: :left, sortable: true, color_fn: nil}
     end)
   end
 
@@ -889,13 +915,11 @@ defmodule Drafter.Widget.DataTable do
     if col_count > 0 do
       case fit_mode do
         :fit ->
-          # Fit all columns within available width
           base_width = div(total_width, col_count)
           remainder = rem(total_width, col_count)
 
           widths = List.duplicate(base_width, col_count)
 
-          # Distribute remainder
           if remainder > 0 do
             {first_part, rest} = Enum.split(widths, remainder)
             Enum.map(first_part, &(&1 + 1)) ++ rest
@@ -904,7 +928,6 @@ defmodule Drafter.Widget.DataTable do
           end
 
         :expand ->
-          # Calculate optimal widths based on content, allow horizontal scrolling
           calculate_content_based_widths(columns, data, total_width)
       end
     else
@@ -913,15 +936,11 @@ defmodule Drafter.Widget.DataTable do
   end
 
   defp calculate_content_based_widths(columns, data, min_total_width) do
-    # Calculate optimal width for each column based on content
     optimal_widths =
       columns
       |> Enum.map(fn column ->
-        # Header width
-        # +2 for sort indicator
         header_width = String.length(column.label) + 2
 
-        # Content width (sample first 20 rows for performance)
         content_width =
           data
           |> Enum.take(20)
@@ -934,15 +953,12 @@ defmodule Drafter.Widget.DataTable do
           end)
           |> Enum.max(fn -> 0 end)
 
-        # Use the larger of header or content width, with reasonable bounds
         width = max(header_width, content_width)
-        # Min 8, max 30 characters per column
         max(8, min(30, width))
       end)
 
     total_optimal = Enum.sum(optimal_widths)
 
-    # If total is less than available space, distribute extra space
     if total_optimal < min_total_width do
       extra_space = min_total_width - total_optimal
       extra_per_col = div(extra_space, length(optimal_widths))
@@ -962,7 +978,6 @@ defmodule Drafter.Widget.DataTable do
   end
 
   defp format_cell_content(content, width, align) when width > 0 do
-    # Truncate if too long
     truncated =
       if String.length(content) > width do
         String.slice(content, 0, max(0, width - 1)) <> "…"
@@ -970,7 +985,6 @@ defmodule Drafter.Widget.DataTable do
         content
       end
 
-    # Apply alignment
     case align do
       :left ->
         String.pad_trailing(truncated, width)
@@ -989,8 +1003,7 @@ defmodule Drafter.Widget.DataTable do
   defp format_cell_content(_content, _width, _align), do: ""
 
   defp calculate_column_from_x(state, x) do
-    column_widths =
-      calculate_column_widths(state.columns, state.width, state.column_fit_mode, state.data)
+    column_widths = get_column_widths(state, state.width)
 
     {col_index, _} =
       column_widths
@@ -999,7 +1012,7 @@ defmodule Drafter.Widget.DataTable do
         if x >= current_x && x < current_x + width do
           {:halt, {col_index, current_x}}
         else
-          {:cont, {col_index, current_x + width}}
+          {:cont, {current_x + width, col_index}}
         end
       end)
 
@@ -1076,56 +1089,42 @@ defmodule Drafter.Widget.DataTable do
     visible_rows = data_height
 
     if total_rows > visible_rows do
-      # Calculate scrollbar position (consistent with click handling)
       max_scroll = total_rows - visible_rows
 
-      # Determine data start position - if header exists, scrollbar for data starts at row 1
       data_start_y = get_data_start_y(state)
 
-      # Use same calculation as click handling for consistency
       scrollbar_pos =
         if max_scroll > 0 do
-          # When fully scrolled (scroll_offset == max_scroll), thumb should be at last data row
           if state.scroll_offset >= max_scroll do
             data_start_y + data_height - 1
           else
             scroll_ratio = state.scroll_offset / max_scroll
             pos = round(scroll_ratio * (data_height - 1))
-            # Position relative to data start
             data_start_y + pos
           end
         else
           data_start_y
         end
 
-      # Add scrollbar to each strip
       strips
       |> Enum.with_index()
       |> Enum.map(fn {strip, index} ->
         scrollbar_char =
           cond do
-            # Scrollbar thumb
             index == scrollbar_pos -> "█"
-            # Scrollbar track (only in data area)
             index >= data_start_y -> "│"
-            # Empty space (header area)
             true -> " "
           end
 
-        # Enhanced scrollbar styling with hover effects - independent of row styling
         scrollbar_style =
           cond do
             index == scrollbar_pos and state.hovering_scrollbar ->
-              # Vibrant thumb color on hover
-              # Bright blue
               %{fg: {255, 255, 255}, bg: {0, 150, 255}}
 
             index == scrollbar_pos ->
-              # Normal thumb color
               %{fg: {200, 200, 200}, bg: {100, 100, 100}}
 
             true ->
-              # Track color - consistent background
               %{fg: {100, 100, 100}, bg: {60, 60, 60}}
           end
 
@@ -1141,20 +1140,16 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
-  # DataTable-specific helper functions matching OptionList pattern
-
   defp get_highlighted_index(state), do: state.highlighted_index
 
   defp is_selected?(state, index), do: MapSet.member?(state.selected_indices, index)
 
   defp change_selection(state, target_index, trigger_select) do
     if target_index >= 0 and target_index < length(state.data) do
-      # Update highlighted_index and ensure visibility
       new_state =
         %{state | highlighted_index: target_index}
         |> ensure_visible_index(target_index, get_data_height(state))
 
-      # Update selection if needed
       new_state =
         if trigger_select do
           case state.selection_mode do
@@ -1172,10 +1167,8 @@ defmodule Drafter.Widget.DataTable do
           new_state
         end
 
-      # Collect actions - ALWAYS trigger re-render, plus callback if needed
       actions = []
 
-      # Add callback action if selection changed and callback exists
       actions =
         if trigger_select && state.on_select do
           selected_items =
@@ -1189,7 +1182,6 @@ defmodule Drafter.Widget.DataTable do
           actions
         end
 
-      # Always add render update to ensure visual changes are displayed
       actions = [:render_update | actions]
 
       {:ok, new_state, actions}
@@ -1213,7 +1205,6 @@ defmodule Drafter.Widget.DataTable do
   end
 
   defp find_first_enabled(data) do
-    # All data rows are enabled
     Enum.find_index(data, fn _row -> true end)
   end
 
@@ -1256,5 +1247,27 @@ defmodule Drafter.Widget.DataTable do
         selected_style: %{fg: theme.text_primary, bg: theme.primary},
         cursor_style: %{fg: theme.text_primary, bg: theme.primary, bold: true}
     }
+  end
+
+  defp get_column_widths(state, table_width) do
+    state._col_widths ||
+      calculate_column_widths(state.columns, table_width, state.column_fit_mode, state.data)
+  end
+
+
+  defp do_column_resize(state, x) do
+    delta = x - state._resize_start_x
+    new_width = max(3, state._resize_start_width + delta)
+    new_col_widths = List.replace_at(state._col_widths, state._resize_col, new_width)
+    {:ok, %{state | _col_widths: new_col_widths}, [:render_update]}
+  end
+
+  defp resize_cursor_col(state, delta) do
+    col = state.cursor_col
+    widths = get_column_widths(state, state.width)
+    current = Enum.at(widths, col, 10)
+    new_width = max(3, current + delta)
+    new_col_widths = List.replace_at(widths, col, new_width)
+    {:ok, %{state | _col_widths: new_col_widths}, [:render_update]}
   end
 end

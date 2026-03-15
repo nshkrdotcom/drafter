@@ -12,6 +12,7 @@ defmodule Drafter.Application do
       Drafter.Event.CustomRegistry,
       Drafter.ActionRegistry,
       Drafter.EventHandler,
+      Drafter.FocusRegistry,
       Drafter.ScreenManager,
       Drafter.ThemeManager,
       {Registry, keys: :unique, name: Drafter.Session.Registry},

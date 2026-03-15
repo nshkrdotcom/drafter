@@ -14,12 +14,14 @@ defmodule ThemeSandbox do
       sparkline_data: Enum.map(1..20, fn _ -> :rand.uniform(10) end),
       current_time: current_time(),
       table_data: [
-        %{name: "Alice", age: 28, city: "New York",    status: "Active"},
-        %{name: "Bob",   age: 34, city: "Los Angeles", status: "Pending"},
-        %{name: "Carol", age: 22, city: "Chicago",     status: "Active"},
-        %{name: "Dave",  age: 45, city: "Houston",     status: "Inactive"},
-        %{name: "Eve",   age: 31, city: "Phoenix",     status: "Active"},
-        %{name: "Frank", age: 29, city: "Seattle",     status: "Pending"}
+        %{name: "Alice",   age: 28, score: 92, status: "Active"},
+        %{name: "Bob",     age: 34, score: 45, status: "Pending"},
+        %{name: "Carol",   age: 22, score: 78, status: "Active"},
+        %{name: "Dave",    age: 45, score: 31, status: "Inactive"},
+        %{name: "Eve",     age: 31, score: 67, status: "Active"},
+        %{name: "Frank",   age: 29, score: 55, status: "Pending"},
+        %{name: "Grace",   age: 38, score: 88, status: "Active"},
+        %{name: "Henry",   age: 52, score: 23, status: "Inactive"}
       ],
       tree_data: [
         %{id: :docs, label: "Documents", icon: "📁", expanded: true, children: [
@@ -51,11 +53,26 @@ defmodule ThemeSandbox do
   end
 
   def render(state) do
+    status_color = fn
+      "Active"   -> {30, 110, 55}
+      "Pending"  -> {130, 100, 20}
+      "Inactive" -> {110, 35, 35}
+      _          -> nil
+    end
+
+    score_color = fn score ->
+      cond do
+        score >= 80 -> {30, 110, 55}
+        score >= 50 -> {130, 100, 20}
+        true        -> {110, 35, 35}
+      end
+    end
+
     table_columns = [
       %{key: :name,   label: "Name",   sortable: true},
       %{key: :age,    label: "Age",    sortable: true, align: :right},
-      %{key: :city,   label: "City",   sortable: true},
-      %{key: :status, label: "Status", sortable: true}
+      %{key: :score,  label: "Score",  sortable: true, align: :right, color_fn: score_color},
+      %{key: :status, label: "Status", sortable: true, color_fn: status_color}
     ]
 
     menu_tabs = [
@@ -146,8 +163,8 @@ defmodule ThemeSandbox do
                 ], width: 32),
                 vertical([
                   label("DataTable:"),
-                  data_table(columns: table_columns, data: state.table_data, height: 6)
-                ], width: 40)
+                  data_table(columns: table_columns, data: state.table_data, height: 9)
+                ], width: 48)
               ], gap: 2),
               label(""),
               label("Sparkline (live):"),

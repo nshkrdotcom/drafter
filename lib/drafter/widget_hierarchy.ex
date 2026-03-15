@@ -810,6 +810,16 @@ defmodule Drafter.WidgetHierarchy do
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
 
+      {:drag, widget_id} ->
+        relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+
+        {new_hierarchy, actions} =
+          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+        widget_state = get_widget_state(new_hierarchy, widget_id)
+        new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
+        {new_hierarchy, actions}
+
       {:scroll, widget_id} ->
         relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
@@ -820,10 +830,12 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp maybe_start_drag_capture(hierarchy, widget_id, widget_state) do
-    if widget_state && Map.get(widget_state, :dragging_scrollbar, false) do
+    if widget_state &&
+         (Map.get(widget_state, :dragging_scrollbar, false) ||
+            Map.get(widget_state, :_resize_col) != nil) do
       %{hierarchy | drag_capture_widget: widget_id}
     else
-      hierarchy
+      %{hierarchy | drag_capture_widget: nil}
     end
   end
 

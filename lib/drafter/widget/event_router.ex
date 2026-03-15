@@ -52,6 +52,11 @@ defmodule Drafter.Widget.EventRouter do
 
       {:focus} ->
         if focusable do
+          if function_exported?(module, :keybindings, 0) do
+            Drafter.FocusRegistry.set(module.keybindings())
+          else
+            Drafter.FocusRegistry.clear()
+          end
           handle_focus(state, true)
         else
           {:bubble, state}
@@ -59,6 +64,7 @@ defmodule Drafter.Widget.EventRouter do
 
       {:blur} ->
         if focusable do
+          Drafter.FocusRegistry.clear()
           handle_focus(state, false)
         else
           {:bubble, state}

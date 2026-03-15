@@ -117,16 +117,22 @@ defmodule Drafter.Widget.Footer do
         state.bindings
 
       true ->
-        active_module =
-          case Drafter.ScreenManager.get_active_screen() do
-            %{module: mod} when mod != nil -> mod
-            _ -> state.app_module
-          end
+        focused = Drafter.FocusRegistry.get()
 
-        if active_module && function_exported?(active_module, :keybindings, 0) do
-          active_module.keybindings()
+        if focused != [] do
+          focused
         else
-          []
+          active_module =
+            case Drafter.ScreenManager.get_active_screen() do
+              %{module: mod} when mod != nil -> mod
+              _ -> state.app_module
+            end
+
+          if active_module && function_exported?(active_module, :keybindings, 0) do
+            active_module.keybindings()
+          else
+            []
+          end
         end
     end
   end

@@ -3,6 +3,13 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [Unreleased]
+### Added
+- `DataTable`: per-cell background colouring via `color_fn: (raw_value -> {r,g,b} | nil)` on column definitions; applied when the row is not selected
+- `DataTable`: 3-state column sort cycle — click cycles ascending → descending → unsorted (restores original data order); `↕` indicator shown on all sortable-but-unsorted columns when `sortable: true`
+- `DataTable`: table-level `sortable: false` option disables all sort indicators and click-to-sort
+- `DataTable`: column width drag-resize — click and drag a column border in the header row to resize; minimum 3 characters
+
 ## [0.1.14] - 2026-03-14
 ### Fixed
 - Timer-driven re-renders skipped when `on_timer/2` returns state unchanged (`===`);
