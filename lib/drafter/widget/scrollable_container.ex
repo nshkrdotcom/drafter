@@ -148,6 +148,42 @@ defmodule Drafter.Widget.ScrollableContainer do
       {:mouse, %{type: :scroll, direction: :down}} ->
         scroll_by(state, 0, 3)
 
+      {:mouse, %{type: :mouse_down, y: y}} ->
+        {thumb_start, thumb_height} = get_thumb_position(state)
+
+        if y >= thumb_start and y < thumb_start + thumb_height do
+          {:ok, %{state | dragging_scrollbar: true, drag_thumb_offset: y - thumb_start}}
+        else
+          {:noreply, state}
+        end
+
+      {:mouse, %{type: :mouse_move, y: y}} when state.dragging_scrollbar ->
+        {_thumb_start, thumb_height} = get_thumb_position(state)
+        desired_thumb_start = y - state.drag_thumb_offset
+        max_thumb_start = max(1, state.viewport_height - thumb_height)
+        scroll_ratio = desired_thumb_start / max_thumb_start
+        max_scroll = max(0, state.content_height - state.viewport_height)
+        new_offset = round(scroll_ratio * max_scroll)
+        new_state = %{state | scroll_offset_y: max(0, min(max_scroll, new_offset))}
+        {:ok, new_state, [:scroll_fast_render]}
+
+      {:mouse, %{type: :mouse_up}} ->
+        {:ok, %{state | dragging_scrollbar: false, drag_thumb_offset: 0}}
+
+      {:mouse, %{type: :click, y: y}} ->
+        {thumb_start, thumb_height} = get_thumb_position(state)
+
+        cond do
+          y < thumb_start ->
+            scroll_by(state, 0, -state.viewport_height)
+
+          y >= thumb_start + thumb_height ->
+            scroll_by(state, 0, state.viewport_height)
+
+          true ->
+            {:noreply, state}
+        end
+
       _ ->
         {:bubble, state}
     end

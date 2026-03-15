@@ -155,6 +155,8 @@ defmodule Drafter.WidgetHierarchy do
           WidgetServer.stop(widget_info.pid)
         end
 
+        Drafter.WidgetStripCache.delete(widget_id)
+
         new_widgets =
           if widget_info.parent do
             case Map.get(hierarchy.widgets, widget_info.parent) do
@@ -215,10 +217,7 @@ defmodule Drafter.WidgetHierarchy do
       widget_info ->
         if widget_info.pid do
           WidgetServer.update_props(widget_info.pid, new_props)
-          new_state = WidgetServer.get_state(widget_info.pid)
-          updated_widget = %{widget_info | state: new_state}
-          new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
-          %{hierarchy | widgets: new_widgets}
+          hierarchy
         else
           new_state =
             if function_exported?(widget_info.module, :update, 2) do

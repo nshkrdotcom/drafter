@@ -493,6 +493,7 @@ defmodule Drafter do
         end
 
       :scroll_debounce_render ->
+        drain_scroll_debounce_renders()
         Process.delete(:scroll_debounce_ref)
 
         if widget_hierarchy do
@@ -560,6 +561,8 @@ defmodule Drafter do
   end
 
   defp start_system() do
+    Drafter.WidgetStripCache.create()
+
     with {:ok, _} <- ensure_started(Event.Manager.start_link()),
          {:ok, _} <- ensure_started(Terminal.Driver.start_link()),
          {:ok, _} <- ensure_started(Compositor.start_link()),
@@ -839,15 +842,17 @@ defmodule Drafter do
         end
 
       {:widget_render_needed, _widget_id} ->
+        drain_widget_render_notifications()
+
         if widget_hierarchy do
-          updated_hierarchy = sync_widget_states(widget_hierarchy)
-          render_hierarchy(updated_hierarchy, screen_rect)
-          app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
+          render_hierarchy(widget_hierarchy, screen_rect)
+          app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
         else
           app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
         end
 
       :scroll_debounce_render ->
+        drain_scroll_debounce_renders()
         Process.delete(:scroll_debounce_ref)
 
         if widget_hierarchy do
@@ -1114,20 +1119,6 @@ defmodule Drafter do
     end
   end
 
-  defp sync_widget_states(hierarchy) do
-    Enum.reduce(hierarchy.widgets, hierarchy, fn {widget_id, widget_info}, acc ->
-      case widget_info do
-        %{pid: pid} when is_pid(pid) ->
-          new_state = Drafter.WidgetServer.get_state(pid)
-          updated_widget = %{widget_info | state: new_state}
-          new_widgets = Map.put(acc.widgets, widget_id, updated_widget)
-          %{acc | widgets: new_widgets}
-
-        _ ->
-          acc
-      end
-    end)
-  end
 
   defp check_global_quit(event) do
     case event do
@@ -1154,6 +1145,22 @@ defmodule Drafter do
 
     new_ref = Process.send_after(self(), :scroll_debounce_render, @scroll_debounce_ms)
     Process.put(:scroll_debounce_ref, new_ref)
+  end
+
+  defp drain_widget_render_notifications do
+    receive do
+      {:widget_render_needed, _} -> drain_widget_render_notifications()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp drain_scroll_debounce_renders do
+    receive do
+      :scroll_debounce_render -> drain_scroll_debounce_renders()
+    after
+      0 -> :ok
+    end
   end
 
   defp make_screen_rect(width, height) do
@@ -1544,24 +1551,28 @@ defmodule Drafter do
 
           if widget_rect && widget_info do
             {render_rect, widget_strips} =
-              if widget_info.pid do
-                Drafter.WidgetServer.get_render(widget_info.pid)
-              else
-                cache = Process.get(:widget_render_cache, %{})
-                cache_key = :erlang.phash2({widget_info.state, widget_rect.width, widget_rect.height})
+              case Drafter.WidgetStripCache.get(widget_id) do
+                {cached_rect, strips} -> {cached_rect, strips}
+                nil ->
+                  if widget_info.pid do
+                    Drafter.WidgetServer.get_render(widget_info.pid)
+                  else
+                    cache = Process.get(:widget_render_cache, %{})
+                    cache_key = :erlang.phash2({widget_info.state, widget_rect.width, widget_rect.height})
 
-                strips =
-                  case Map.get(cache, widget_id) do
-                    {^cache_key, cached} ->
-                      cached
+                    strips =
+                      case Map.get(cache, widget_id) do
+                        {^cache_key, cached} ->
+                          cached
 
-                    _ ->
-                      result = apply(widget_info.module, :render, [widget_info.state, widget_rect])
-                      Process.put(:widget_render_cache, Map.put(cache, widget_id, {cache_key, result}))
-                      result
+                        _ ->
+                          result = apply(widget_info.module, :render, [widget_info.state, widget_rect])
+                          Process.put(:widget_render_cache, Map.put(cache, widget_id, {cache_key, result}))
+                          result
+                      end
+
+                    {widget_rect, strips}
                   end
-
-                {widget_rect, strips}
               end
 
             scroll_parent_id =

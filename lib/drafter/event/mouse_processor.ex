@@ -71,7 +71,6 @@ defmodule Drafter.Event.MouseProcessor do
   def handle_cast({:process_event, %{type: :mouse_up} = event}, state) do
     new_state = %{state | mouse_position: {event.x, event.y}}
 
-    # Generate click event if mouse up is on same widget as mouse down
     mouse_up_widget = get_widget_at_position(event.x, event.y)
     if mouse_up_widget == state.mouse_down_widget and state.mouse_down_widget != nil do
       click_event = %{event | type: :click}
@@ -99,8 +98,11 @@ defmodule Drafter.Event.MouseProcessor do
 
       {:noreply, final_state}
     else
-      # Forward the mouse up event to specific widget
-      forward_event_to_widget(mouse_up_widget, event)
+      if state.mouse_down_widget != nil do
+        forward_event_to_widget(state.mouse_down_widget, event)
+      else
+        forward_event_to_widget(mouse_up_widget, event)
+      end
 
       final_state = %{new_state | mouse_down_widget: nil}
       {:noreply, final_state}
@@ -110,34 +112,34 @@ defmodule Drafter.Event.MouseProcessor do
   def handle_cast({:process_event, %{type: :mouse_move} = event}, state) do
     new_state = %{state | mouse_position: {event.x, event.y}}
 
-    # Generate enter/leave events for hover states
-    current_widget = get_widget_at_position(event.x, event.y)
+    if state.mouse_down_widget != nil do
+      forward_event_to_widget(state.mouse_down_widget, event)
+      {:noreply, new_state}
+    else
+      current_widget = get_widget_at_position(event.x, event.y)
 
-    cond do
-      current_widget != state.mouse_hover_widget and state.mouse_hover_widget != nil ->
-        # Mouse left previous widget
-        leave_event = Mouse.leave(event.x, event.y)
-        forward_event_to_widget(state.mouse_hover_widget, leave_event)
+      cond do
+        current_widget != state.mouse_hover_widget and state.mouse_hover_widget != nil ->
+          leave_event = Mouse.leave(event.x, event.y)
+          forward_event_to_widget(state.mouse_hover_widget, leave_event)
 
-        if current_widget != nil do
-          # Mouse entered new widget
+          if current_widget != nil do
+            enter_event = Mouse.enter(event.x, event.y)
+            forward_event_to_widget(current_widget, enter_event)
+          end
+
+          {:noreply, %{new_state | mouse_hover_widget: current_widget}}
+
+        current_widget != nil and state.mouse_hover_widget == nil ->
           enter_event = Mouse.enter(event.x, event.y)
           forward_event_to_widget(current_widget, enter_event)
-        end
 
-        {:noreply, %{new_state | mouse_hover_widget: current_widget}}
+          {:noreply, %{new_state | mouse_hover_widget: current_widget}}
 
-      current_widget != nil and state.mouse_hover_widget == nil ->
-        # Mouse entered widget from empty space
-        enter_event = Mouse.enter(event.x, event.y)
-        forward_event_to_widget(current_widget, enter_event)
-
-        {:noreply, %{new_state | mouse_hover_widget: current_widget}}
-
-      true ->
-        # Mouse moved within same widget or empty space
-        forward_event_to_widget(current_widget, event)
-        {:noreply, new_state}
+        true ->
+          forward_event_to_widget(current_widget, event)
+          {:noreply, new_state}
+      end
     end
   end
 

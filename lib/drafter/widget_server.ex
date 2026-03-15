@@ -3,12 +3,13 @@ defmodule Drafter.WidgetServer do
 
   use GenServer
 
+  alias Drafter.WidgetStripCache
+
   defstruct [
     :id,
     :module,
     :state,
-    :rect,
-    :render_cache
+    :rect
   ]
 
   def start_link(opts) do
@@ -54,15 +55,19 @@ defmodule Drafter.WidgetServer do
     rect = Keyword.get(opts, :rect, %{x: 0, y: 0, width: 10, height: 3})
     id = Keyword.get(opts, :id)
 
+    WidgetStripCache.create()
+
     widget_state = module.mount(props)
 
     state = %__MODULE__{
       id: id,
       module: module,
       state: widget_state,
-      rect: rect,
-      render_cache: nil
+      rect: rect
     }
+
+    strips = apply(module, :render, [widget_state, rect])
+    WidgetStripCache.put(id, rect, strips)
 
     {:ok, state}
   end
@@ -71,13 +76,15 @@ defmodule Drafter.WidgetServer do
   def handle_cast({:event, event}, state) do
     case apply(state.module, :handle_event, [event, state.state]) do
       {:ok, new_widget_state} ->
-        notify_render_needed(state.id)
-        {:noreply, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        render_and_push(new_state)
+        {:noreply, new_state}
 
       {:ok, new_widget_state, actions} ->
         handle_actions(state.id, actions)
-        notify_render_needed(state.id)
-        {:noreply, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        render_and_push(new_state)
+        {:noreply, new_state}
 
       {:noreply, _} ->
         {:noreply, state}
@@ -95,10 +102,15 @@ defmodule Drafter.WidgetServer do
         state.state
       end
 
-    new_cache =
-      if new_widget_state === state.state, do: state.render_cache, else: nil
-
-    {:noreply, %{state | state: new_widget_state, render_cache: new_cache}}
+    if new_widget_state === state.state do
+      {:noreply, state}
+    else
+      new_state = %{state | state: new_widget_state}
+      strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+      WidgetStripCache.put(new_state.id, new_state.rect, strips)
+      notify_render_needed(new_state.id)
+      {:noreply, new_state}
+    end
   end
 
   @impl true
@@ -110,12 +122,9 @@ defmodule Drafter.WidgetServer do
         state.state
       end
 
-    new_cache =
-      if rect == state.rect and new_widget_state === state.state,
-        do: state.render_cache,
-        else: nil
-
-    {:reply, :ok, %{state | rect: rect, state: new_widget_state, render_cache: new_cache}}
+    new_state = %{state | rect: rect, state: new_widget_state}
+    render_and_push(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -124,15 +133,18 @@ defmodule Drafter.WidgetServer do
   end
 
   def handle_call(:get_render, _from, state) do
-    case state.render_cache do
-      {rect, strips} ->
-        {:reply, {rect, strips}, state}
+    result =
+      case WidgetStripCache.get(state.id) do
+        nil ->
+          strips = apply(state.module, :render, [state.state, state.rect])
+          WidgetStripCache.put(state.id, state.rect, strips)
+          {state.rect, strips}
 
-      nil ->
-        strips = apply(state.module, :render, [state.state, state.rect])
-        new_cache = {state.rect, strips}
-        {:reply, new_cache, %{state | render_cache: new_cache}}
-    end
+        cached ->
+          cached
+      end
+
+    {:reply, result, state}
   end
 
   def handle_call({:event_sync, event}, _from, state) do
@@ -140,12 +152,16 @@ defmodule Drafter.WidgetServer do
 
     case result do
       {:ok, new_widget_state} ->
-        notify_render_needed(state.id)
-        {:reply, {:ok, new_widget_state}, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+        WidgetStripCache.put(new_state.id, new_state.rect, strips)
+        {:reply, {:ok, new_widget_state}, new_state}
 
       {:ok, new_widget_state, actions} ->
-        notify_render_needed(state.id)
-        {:reply, {:ok, new_widget_state, actions}, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+        WidgetStripCache.put(new_state.id, new_state.rect, strips)
+        {:reply, {:ok, new_widget_state, actions}, new_state}
 
       {:noreply, new_state} ->
         {:reply, {:noreply, new_state}, state}
@@ -189,12 +205,14 @@ defmodule Drafter.WidgetServer do
 
     case result do
       {:ok, new_widget_state} ->
-        notify_render_needed(state.id)
-        {:noreply, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        render_and_push(new_state)
+        {:noreply, new_state}
 
       {:ok, new_widget_state, _actions} ->
-        notify_render_needed(state.id)
-        {:noreply, %{state | state: new_widget_state, render_cache: nil}}
+        new_state = %{state | state: new_widget_state}
+        render_and_push(new_state)
+        {:noreply, new_state}
 
       {:noreply, _} ->
         {:noreply, state}
@@ -202,6 +220,12 @@ defmodule Drafter.WidgetServer do
       _ ->
         {:noreply, state}
     end
+  end
+
+  defp render_and_push(server_state) do
+    strips = apply(server_state.module, :render, [server_state.state, server_state.rect])
+    WidgetStripCache.put(server_state.id, server_state.rect, strips)
+    notify_render_needed(server_state.id)
   end
 
   defp notify_render_needed(widget_id) do

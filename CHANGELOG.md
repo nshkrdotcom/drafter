@@ -3,10 +3,26 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.20] - 2026-03-16
+### Fixed
+- `WidgetServer`: `event_sync` no longer calls `notify_render_needed` — the event loop renders after `event_sync` returns; calling it again was flooding the mailbox with one `{:widget_render_needed}` per scroll tick
+- `WidgetHierarchy`: `update_widget` no longer blocks on `WidgetServer.get_state/1` after casting `update_props` — `update_props` is now a true fire-and-forget cast; the hierarchy in-memory state is not updated, but ETS has the authoritative strips so rendering is unaffected
+- `app_event_loop` / `shared_session_loop`: `{:widget_render_needed}` handler drains all pending notifications before doing a single `render_hierarchy`, eliminating N-fold duplicate composites when multiple widgets fire at once (e.g. clock + chart on the same tick)
+- `app_event_loop` / `shared_session_loop`: `:scroll_debounce_render` handler drains all accumulated debounce messages before triggering one `render_app`, preventing update debt accumulation during slow/continuous scrolling where successive events arrived more than 150 ms apart
+- Removed `sync_widget_states/1` — no longer needed; `render_hierarchy` reads strips directly from ETS which widget GenServers keep current
+
 ## [0.1.19] - 2026-03-16
 ### Changed
-- `WidgetServer`: `get_render` now caches rendered strips per widget — the cache is invalidated only when widget state or rect changes; if state is unchanged (e.g., during scroll), `get_render` returns the cached result without calling `Widget.render/2`; `update_props` with identical resulting state preserves the existing cache entry
-- `ScrollableContainer`: scroll events (mouse wheel, keyboard up/down/page) use a fast render path — `render_hierarchy` re-clips existing cached strips at the new offset without running `ComponentRenderer`; a 150 ms debounce fires `render_app` once after scroll settles to refresh any newly visible content
+- `WidgetServer`: each widget owns its strip buffer via `Drafter.WidgetStripCache` (ETS, public, `read_concurrency: true`) — rendering happens inside the widget's own GenServer process and results are written to ETS; `create_widget_layers_from_hierarchy` reads from ETS directly (no inter-process messaging, no round-trips)
+- `WidgetServer`: `update_props` renders and writes to ETS when state changes but does **not** send `{:widget_render_needed}` — only autonomous widget state changes (events, timers) notify the event loop, eliminating redundant re-composites after `render_app`
+- `WidgetServer`: `update_props` with identical resulting state is a no-op (no render, no ETS write)
+- `ScrollableContainer`: scroll events use a fast render path — `render_hierarchy` re-clips ETS-cached strips without running `ComponentRenderer`; 150 ms debounce fires `render_app` once after scroll settles
+- `MouseProcessor`: `mouse_move` while a button is held routes to the `mouse_down_widget` regardless of cursor position, enabling drag-out-of-bounds behaviour; `mouse_up` after drag-release outside the originating widget notifies the `mouse_down_widget` so it can clear drag state
+
+### Added
+- `WidgetStripCache`: ETS-backed strip store keyed by widget ID; lock-free reads from any process
+- `ScrollableContainer`: click on scrollbar track jumps one viewport page toward the thumb
+- `ScrollableContainer`: drag the scrollbar thumb — `mouse_down` on thumb begins drag, `mouse_move` continuously updates scroll offset, `mouse_up` ends drag
 
 ## [0.1.18] - 2026-03-15
 ### Fixed
