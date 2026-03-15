@@ -1261,10 +1261,17 @@ defmodule Drafter.Widget.DataTable do
               new_state
 
             :single ->
-              %{new_state | selected_indices: MapSet.new([target_index])}
+              new_selected =
+                if is_selected?(state, target_index),
+                  do: MapSet.new(),
+                  else: MapSet.new([target_index])
+              %{new_state | selected_indices: new_selected}
 
             :multiple ->
-              new_selected = MapSet.put(state.selected_indices, target_index)
+              new_selected =
+                if is_selected?(state, target_index),
+                  do: MapSet.delete(state.selected_indices, target_index),
+                  else: MapSet.put(state.selected_indices, target_index)
               %{new_state | selected_indices: new_selected}
           end
         else
