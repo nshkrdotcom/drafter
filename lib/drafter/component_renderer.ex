@@ -507,6 +507,7 @@ defmodule Drafter.ComponentRenderer do
         data = Keyword.get(opts, :data, [])
         on_select = Keyword.get(opts, :on_select)
         on_sort = Keyword.get(opts, :on_sort)
+        on_layout_change = Keyword.get(opts, :on_layout_change)
         height = Keyword.get(opts, :height, 15)
         actual_height = if height == :auto, do: 8, else: height
 
@@ -521,6 +522,13 @@ defmodule Drafter.ComponentRenderer do
 
         custom_styles = Keyword.get(opts, :styles, %{})
         themed_styles = ThemeHelper.data_table_styles(theme, custom_styles)
+
+        wrapped_on_layout_change =
+          if on_layout_change do
+            fn layout -> send_app_callback(on_layout_change, layout) end
+          else
+            nil
+          end
 
         mount_props =
           Map.merge(
@@ -538,6 +546,10 @@ defmodule Drafter.ComponentRenderer do
                 Keyword.get(opts, :mouse_scroll_moves_selection, true),
               mouse_scroll_selects_item: Keyword.get(opts, :mouse_scroll_selects_item, false),
               sort_by: Keyword.get(opts, :sort_by),
+              locked: Keyword.get(opts, :locked, true),
+              resizable: Keyword.get(opts, :resizable, true),
+              col_widths: Keyword.get(opts, :col_widths),
+              col_order: Keyword.get(opts, :col_order),
               classes: classes,
               on_select:
                 if on_select do
@@ -552,7 +564,8 @@ defmodule Drafter.ComponentRenderer do
                   end
                 else
                   nil
-                end
+                end,
+              on_layout_change: wrapped_on_layout_change
             },
             themed_styles
           )
@@ -566,7 +579,10 @@ defmodule Drafter.ComponentRenderer do
               data: data,
               classes: classes,
               on_select: mount_props.on_select,
-              on_sort: mount_props.on_sort
+              on_sort: mount_props.on_sort,
+              on_layout_change: wrapped_on_layout_change,
+              col_widths: Keyword.get(opts, :col_widths),
+              col_order: Keyword.get(opts, :col_order)
             }
 
             updated_props =
@@ -586,7 +602,6 @@ defmodule Drafter.ComponentRenderer do
             hierarchy = WidgetHierarchy.update_widget_rect(hierarchy, widget_id, rect)
             WidgetHierarchy.update_widget(hierarchy, widget_id, updated_props)
           else
-            # New widget - add it
             WidgetHierarchy.add_widget(
               hierarchy,
               widget_id,
