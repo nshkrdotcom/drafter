@@ -61,7 +61,7 @@ end
 
 ## [0.1.19] - 2026-03-16
 ### Changed
-- `WidgetServer`: each widget owns its strip buffer via `Drafter.WidgetStripCache` (ETS, public, `read_concurrency: true`) — rendering happens inside the widget's own GenServer process and results are written to ETS; `create_widget_layers_from_hierarchy` reads from ETS directly (no inter-process messaging, no round-trips)
+- `WidgetServer`: each widget owns its strip buffer via `WidgetStripCache` (ETS, public, `read_concurrency: true`) — rendering happens inside the widget's own GenServer process and results are written to ETS; `create_widget_layers_from_hierarchy` reads from ETS directly (no inter-process messaging, no round-trips)
 - `WidgetServer`: `update_props` renders and writes to ETS when state changes but does **not** send `{:widget_render_needed}` — only autonomous widget state changes (events, timers) notify the event loop, eliminating redundant re-composites after `render_app`
 - `WidgetServer`: `update_props` with identical resulting state is a no-op (no render, no ETS write)
 - `ScrollableContainer`: scroll events use a fast render path — `render_hierarchy` re-clips ETS-cached strips without running `ComponentRenderer`; 150 ms debounce fires `render_app` once after scroll settles
