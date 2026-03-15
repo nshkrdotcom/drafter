@@ -3,6 +3,17 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.16] - 2026-03-15
+### Changed
+- `Digits`: improved `B` glyph in both large and small sizes — more distinguishable from `8` and `6`; large uses flat `├` spine with `╲`/`╱` bump sides, small uses `╲` divider in the middle row
+
+### Added
+- `Rule`: new widget — horizontal/vertical divider line with optional embedded title, `title_align`, and `line_style` (`:solid`, `:double`, `:dashed`, `:thick`)
+- `Tree`: `on_node_highlight:` callback fires whenever cursor moves to a new node; `Shift+←`/`Shift+→` navigates to previous/next sibling at the same depth
+- `SelectionList`: `on_item_toggle:` callback fires with `{index, selected?}` on each individual item toggle; `Home`/`End` jump to first/last item; `Ctrl+A` toggles select-all / deselect-all in `:multiple` mode
+- `MaskedInput`: `on_submit:` callback fires with the raw unmasked value on `Enter`
+- `TextArea`: text selection (`Shift+Arrow`, `Ctrl+A`), copy/cut/paste (`Ctrl+C`/`X`/`V`), undo/redo (`Ctrl+Z`/`Y`), `read_only:`, `tab_behavior:` (`:focus` or `:indent`), `tab_size:`, `max_checkpoints:`, word navigation (`Ctrl+←`/`→`), page up/down, `highlight_cursor_line:`
+
 ## [0.1.15] - 2026-03-15
 ### Added
 - `DataTable`: per-cell background colouring via `color_fn: (raw_value -> {r,g,b} | nil)` on column definitions; applied when the row is not selected

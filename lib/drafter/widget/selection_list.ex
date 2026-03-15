@@ -34,7 +34,7 @@ defmodule Drafter.Widget.SelectionList do
   """
 
   use Drafter.Widget,
-    handles: [:keyboard],
+    handles: [:keyboard, :char],
     focusable: true
 
   alias Drafter.Draw.{Segment, Strip}
@@ -46,6 +46,7 @@ defmodule Drafter.Widget.SelectionList do
     :highlighted_index,
     :focused,
     :on_change,
+    :on_item_toggle,
     :visible_height,
     :scroll_offset,
     :selection_mode
@@ -71,6 +72,7 @@ defmodule Drafter.Widget.SelectionList do
       highlighted_index: 0,
       focused: Map.get(props, :focused, false),
       on_change: Map.get(props, :on_change),
+      on_item_toggle: Map.get(props, :on_item_toggle),
       visible_height: Map.get(props, :visible_height, length(options)),
       scroll_offset: 0,
       selection_mode: selection_mode
@@ -112,7 +114,14 @@ defmodule Drafter.Widget.SelectionList do
     new_state = Map.merge(state, props)
 
     selection_mode = Map.get(props, :selection_mode, state.selection_mode)
+
     %{new_state | selection_mode: selection_mode}
+    |> then(fn s ->
+      case Map.fetch(props, :on_item_toggle) do
+        {:ok, cb} -> %{s | on_item_toggle: cb}
+        :error -> s
+      end
+    end)
   end
 
   def handle_event(event, state) do
@@ -126,6 +135,29 @@ defmodule Drafter.Widget.SelectionList do
         max_index = length(state.options) - 1
         new_index = min(max_index, state.highlighted_index + 1)
         new_state = %{state | highlighted_index: new_index} |> ensure_visible()
+        {:ok, new_state}
+
+      {:key, :home} ->
+        new_state = %{state | highlighted_index: 0, scroll_offset: 0}
+        {:ok, new_state}
+
+      {:key, :end} ->
+        max_index = length(state.options) - 1
+        new_state = %{state | highlighted_index: max_index} |> ensure_visible()
+        {:ok, new_state}
+
+      {:char, 1} when state.selection_mode == :multiple ->
+        all_indices = MapSet.new(0..(length(state.options) - 1))
+
+        new_selected =
+          if MapSet.equal?(state.selected_indices, all_indices) do
+            MapSet.new()
+          else
+            all_indices
+          end
+
+        new_state = %{state | selected_indices: new_selected}
+        trigger_change(new_state)
         {:ok, new_state}
 
       {:key, :enter} ->
@@ -161,11 +193,14 @@ defmodule Drafter.Widget.SelectionList do
         new_selected = MapSet.new([index])
         new_state = %{state | selected_indices: new_selected}
         trigger_change(new_state)
+        trigger_item_toggle(new_state, index, true)
         {:ok, new_state}
 
       :multiple ->
+        was_selected = MapSet.member?(state.selected_indices, index)
+
         new_selected =
-          if MapSet.member?(state.selected_indices, index) do
+          if was_selected do
             MapSet.delete(state.selected_indices, index)
           else
             MapSet.put(state.selected_indices, index)
@@ -173,12 +208,14 @@ defmodule Drafter.Widget.SelectionList do
 
         new_state = %{state | selected_indices: new_selected}
         trigger_change(new_state)
+        trigger_item_toggle(new_state, index, not was_selected)
         {:ok, new_state}
 
       _ ->
         new_selected = MapSet.new([index])
         new_state = %{state | selected_indices: new_selected}
         trigger_change(new_state)
+        trigger_item_toggle(new_state, index, true)
         {:ok, new_state}
     end
   end
@@ -245,6 +282,17 @@ defmodule Drafter.Widget.SelectionList do
       Segment.new(String.duplicate(" ", remaining), bg_style)
     ])
   end
+
+  defp trigger_item_toggle(%{on_item_toggle: callback}, index, new_selected_state)
+       when is_function(callback, 2) do
+    try do
+      callback.(index, new_selected_state)
+    rescue
+      _error -> :ok
+    end
+  end
+
+  defp trigger_item_toggle(_state, _index, _new_selected_state), do: :ok
 
   defp trigger_change(state) do
     if state.on_change do

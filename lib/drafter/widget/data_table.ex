@@ -48,6 +48,11 @@ defmodule Drafter.Widget.DataTable do
     * `:on_layout_change` - `(%{col_widths: [...], col_order: [...]}) -> term()` called after resize or reorder
     * `:col_widths` - initial list of column widths in display order; used to restore a saved layout
     * `:col_order` - initial list of original column indices in display order; used to restore a saved layout
+    * `:cursor_type` - `:row` (default, highlights entire row), `:cell` (highlights only the cell at cursor column),
+      `:column` (highlights entire column across all rows), or `:none` (no cursor highlight)
+    * `:cell_padding` - number of spaces to pad on each side of cell content (default: `0`)
+    * `:on_row_highlight` - `(row :: map() -> term())` called when the cursor moves to a new row
+    * `:on_header_select` - `(column_key :: atom() -> term())` called when a column header is clicked
 
   ## Key bindings
 
@@ -130,7 +135,11 @@ defmodule Drafter.Widget.DataTable do
     :_resize_col,
     :_resize_start_x,
     :_resize_start_width,
-    :_reorder_col
+    :_reorder_col,
+    :cursor_type,
+    :cell_padding,
+    :on_row_highlight,
+    :on_header_select
   ]
 
   @type column :: %{
@@ -165,6 +174,8 @@ defmodule Drafter.Widget.DataTable do
           cursor_style: Segment.style(),
           on_select: ([row()] -> term()) | nil,
           on_sort: (atom(), sort_direction() -> term()) | nil,
+          on_row_highlight: (row() -> term()) | nil,
+          on_header_select: (atom() -> term()) | nil,
           show_header: boolean(),
           show_cursor: boolean(),
           zebra_stripes: boolean(),
@@ -177,6 +188,8 @@ defmodule Drafter.Widget.DataTable do
           sortable: boolean(),
           resizable: boolean(),
           locked: boolean(),
+          cursor_type: :row | :cell | :column | :none,
+          cell_padding: non_neg_integer(),
           on_layout_change: (%{col_widths: [pos_integer()], col_order: [non_neg_integer()]} -> term()) | nil
         }
 
@@ -224,6 +237,8 @@ defmodule Drafter.Widget.DataTable do
       cursor_style:
         Map.get(props, :cursor_style, %{fg: {255, 255, 255}, bg: {50, 100, 200}, bold: true}),
       on_select: Map.get(props, :on_select),
+      on_row_highlight: Map.get(props, :on_row_highlight),
+      on_header_select: Map.get(props, :on_header_select),
       mouse_scroll_moves_selection: Map.get(props, :mouse_scroll_moves_selection, true),
       mouse_scroll_selects_item: Map.get(props, :mouse_scroll_selects_item, false),
       dragging_scrollbar: false,
@@ -242,6 +257,8 @@ defmodule Drafter.Widget.DataTable do
       sortable: Map.get(props, :sortable, true),
       resizable: Map.get(props, :resizable, true),
       locked: Map.get(props, :locked, true),
+      cursor_type: Map.get(props, :cursor_type, :row),
+      cell_padding: Map.get(props, :cell_padding, 0),
       on_layout_change: Map.get(props, :on_layout_change),
       _unsorted_data: data,
       _col_widths: Map.get(props, :col_widths),
@@ -487,6 +504,10 @@ defmodule Drafter.Widget.DataTable do
         cursor_style: Map.get(props, :cursor_style, state.cursor_style),
         on_select: Map.get(props, :on_select, state.on_select),
         on_sort: Map.get(props, :on_sort, state.on_sort),
+        on_row_highlight: Map.get(props, :on_row_highlight, state.on_row_highlight),
+        on_header_select: Map.get(props, :on_header_select, state.on_header_select),
+        cursor_type: Map.get(props, :cursor_type, state.cursor_type),
+        cell_padding: Map.get(props, :cell_padding, state.cell_padding),
         show_header: Map.get(props, :show_header, state.show_header),
         show_cursor: Map.get(props, :show_cursor, state.show_cursor),
         zebra_stripes: Map.get(props, :zebra_stripes, state.zebra_stripes),
@@ -797,6 +818,10 @@ defmodule Drafter.Widget.DataTable do
     if col_index < length(state.columns) do
       column = Enum.at(get_ordered_columns(state), col_index)
 
+      if state.on_header_select do
+        state.on_header_select.(column.key)
+      end
+
       if state.sortable && column.sortable do
         {new_direction, new_data, new_sort_col} =
           cond do
@@ -821,7 +846,7 @@ defmodule Drafter.Widget.DataTable do
         trigger_sort(new_state)
         {:ok, new_state}
       else
-        {:noreply, state}
+        {:ok, %{state | cursor_col: col_index}}
       end
     else
       {:noreply, state}
@@ -857,7 +882,12 @@ defmodule Drafter.Widget.DataTable do
       |> Enum.zip(column_widths)
       |> Enum.with_index()
       |> Enum.map(fn {{column, width}, col_index} ->
-        is_cursor_col = state.show_cursor && focused(state) && col_index == state.cursor_col
+        is_cursor_col =
+          focused(state) && col_index == state.cursor_col &&
+            case state.cursor_type do
+              :none -> false
+              _ -> state.show_cursor
+            end
 
         {label_width, indicator} =
           if state.sortable && column.sortable && width > 1 do
@@ -872,7 +902,7 @@ defmodule Drafter.Widget.DataTable do
             {width, ""}
           end
 
-        formatted_text = format_cell_content(column.label, label_width, column.align) <> indicator
+        formatted_text = format_cell_content(column.label, label_width, column.align, 0) <> indicator
 
         style =
           if is_cursor_col do
@@ -899,15 +929,16 @@ defmodule Drafter.Widget.DataTable do
 
   defp render_row(state, row, row_index, column_widths, total_width) do
     is_selected = MapSet.member?(state.selected_indices, row_index)
+    is_highlighted = state.highlighted_index == row_index
     is_zebra = state.zebra_stripes && rem(row_index, 2) == 1
 
     segments =
       get_ordered_columns(state)
       |> Enum.zip(column_widths)
       |> Enum.with_index()
-      |> Enum.map(fn {{column, width}, _col_index} ->
+      |> Enum.map(fn {{column, width}, col_index} ->
         raw_value = Map.get(row, column.key, "")
-        formatted_text = format_cell_content(to_string(raw_value), width, column.align)
+        formatted_text = format_cell_content(to_string(raw_value), width, column.align, state.cell_padding)
 
         base_style =
           cond do
@@ -917,17 +948,28 @@ defmodule Drafter.Widget.DataTable do
           end
 
         style =
-          if not is_selected do
-            case Map.get(column, :color_fn) do
-              nil -> base_style
-              f ->
-                case f.(raw_value) do
-                  nil -> base_style
-                  color -> Map.put(base_style, :bg, color)
-                end
-            end
-          else
-            base_style
+          cond do
+            is_selected ->
+              base_style
+
+            state.cursor_type == :row && is_highlighted && focused(state) ->
+              state.cursor_style
+
+            state.cursor_type == :cell && is_highlighted && col_index == state.cursor_col && focused(state) ->
+              state.cursor_style
+
+            state.cursor_type == :column && col_index == state.cursor_col && focused(state) ->
+              state.cursor_style
+
+            true ->
+              case Map.get(column, :color_fn) do
+                nil -> base_style
+                f ->
+                  case f.(raw_value) do
+                    nil -> base_style
+                    color -> Map.put(base_style, :bg, color)
+                  end
+              end
           end
 
         Segment.new(formatted_text, style)
@@ -1027,30 +1069,36 @@ defmodule Drafter.Widget.DataTable do
     end
   end
 
-  defp format_cell_content(content, width, align) when width > 0 do
+  defp format_cell_content(content, width, align, cell_padding) when width > 0 do
+    pad = String.duplicate(" ", cell_padding)
+    inner_width = max(0, width - 2 * cell_padding)
+
     truncated =
-      if String.length(content) > width do
-        String.slice(content, 0, max(0, width - 1)) <> "…"
+      if String.length(content) > inner_width do
+        String.slice(content, 0, max(0, inner_width - 1)) <> "…"
       else
         content
       end
 
-    case align do
-      :left ->
-        String.pad_trailing(truncated, width)
+    aligned =
+      case align do
+        :left ->
+          String.pad_trailing(truncated, inner_width)
 
-      :right ->
-        String.pad_leading(truncated, width)
+        :right ->
+          String.pad_leading(truncated, inner_width)
 
-      :center ->
-        total_padding = width - String.length(truncated)
-        left_padding = div(total_padding, 2)
-        right_padding = total_padding - left_padding
-        String.duplicate(" ", left_padding) <> truncated <> String.duplicate(" ", right_padding)
-    end
+        :center ->
+          total_padding = inner_width - String.length(truncated)
+          left_padding = div(total_padding, 2)
+          right_padding = total_padding - left_padding
+          String.duplicate(" ", left_padding) <> truncated <> String.duplicate(" ", right_padding)
+      end
+
+    pad <> aligned <> pad
   end
 
-  defp format_cell_content(_content, _width, _align), do: ""
+  defp format_cell_content(_content, _width, _align, _cell_padding), do: ""
 
   defp calculate_column_from_x(state, x) do
     column_widths = get_column_widths(state, state.width)
@@ -1199,6 +1247,11 @@ defmodule Drafter.Widget.DataTable do
       new_state =
         %{state | highlighted_index: target_index}
         |> ensure_visible_index(target_index, get_data_height(state))
+
+      if state.on_row_highlight && target_index != state.highlighted_index do
+        row = Enum.at(state.data, target_index)
+        state.on_row_highlight.(row)
+      end
 
       new_state =
         if trigger_select do

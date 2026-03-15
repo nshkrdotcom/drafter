@@ -12,12 +12,16 @@ defmodule Drafter.Widget.TextInput do
     * `:placeholder` - hint text shown when empty and unfocused (default: `""`)
     * `:bind` - app state key atom for two-way binding; the app state key is kept in sync
     * `:id` - atom identifier for programmatic access via `Drafter.get_widget_value/1`
-    * `:on_change` - `(String.t() -> term())` called on every keystroke
-    * `:on_submit` - `(String.t() -> term())` called when Enter is pressed
+    * `:on_change` - `({String.t(), validation_result()} -> term())` called on every keystroke
+    * `:on_submit` - `({String.t(), validation_result()} -> term())` called when Enter is pressed
     * `:max_length` - maximum number of characters allowed
     * `:validators` - list of `Drafter.Validation` validators run on blur
     * `:disabled` - when `true`, the field is non-interactive (default: `false`)
     * `:readonly` - when `true`, focus is accepted but text cannot be edited (default: `false`)
+    * `:password` - when `true`, renders characters as `•` (default: `false`)
+    * `:restrict` - a `Regex.t()` or string pattern; only matching characters are allowed
+    * `:type` - `:text` (default), `:integer`, or `:number`; built-in character restriction
+    * `:select_on_focus` - when `true`, selects all text on focus (default: `false`)
     * `:style` - map of style overrides
     * `:classes` - list of theme class atoms
 
@@ -28,6 +32,9 @@ defmodule Drafter.Widget.TextInput do
     * `Shift+←` / `Shift+→` / `Shift+Home` / `Shift+End` — extend selection
     * `Ctrl+A` — select all
     * `Ctrl+C` / `Ctrl+X` / `Ctrl+V` — copy, cut, paste
+    * `Ctrl+U` — delete from cursor to start of line
+    * `Ctrl+K` — delete from cursor to end of line
+    * `Ctrl+W` — delete word to the left of cursor
     * `Backspace` / `Delete` — delete character or selection
     * `Enter` — trigger `:on_submit`
     * `Home` / `End` — move cursor to start/end of text
@@ -63,8 +70,14 @@ defmodule Drafter.Widget.TextInput do
     :error,
     :touched,
     :disabled,
-    :readonly
+    :readonly,
+    :password,
+    :restrict,
+    :type,
+    :select_on_focus
   ]
+
+  @type validation_result :: {:ok, String.t()} | {:error, [String.t()]}
 
   @type t :: %__MODULE__{
           text: String.t(),
@@ -74,8 +87,8 @@ defmodule Drafter.Widget.TextInput do
           focused: boolean(),
           style: map(),
           classes: [atom()],
-          on_change: (String.t() -> term()) | nil,
-          on_submit: (String.t() -> term()) | nil,
+          on_change: ({String.t(), validation_result()} -> term()) | nil,
+          on_submit: ({String.t(), validation_result()} -> term()) | nil,
           max_length: pos_integer() | nil,
           width: pos_integer(),
           selection_start: non_neg_integer() | nil,
@@ -85,7 +98,11 @@ defmodule Drafter.Widget.TextInput do
           error: String.t() | nil,
           touched: boolean(),
           disabled: boolean(),
-          readonly: boolean()
+          readonly: boolean(),
+          password: boolean(),
+          restrict: Regex.t() | nil,
+          type: :text | :integer | :number,
+          select_on_focus: boolean()
         }
 
   @impl Drafter.Widget
@@ -109,7 +126,11 @@ defmodule Drafter.Widget.TextInput do
       error: Map.get(props, :error),
       touched: Map.get(props, :touched, false),
       disabled: Map.get(props, :disabled, false),
-      readonly: Map.get(props, :readonly, false)
+      readonly: Map.get(props, :readonly, false),
+      password: Map.get(props, :password, false),
+      restrict: compile_restrict(Map.get(props, :restrict)),
+      type: Map.get(props, :type, :text),
+      select_on_focus: Map.get(props, :select_on_focus, false)
     }
   end
 
@@ -370,6 +391,25 @@ defmodule Drafter.Widget.TextInput do
         trigger_change(new_state)
         {:ok, new_state}
 
+      {:key, :u, [:ctrl]} when state.focused ->
+        after_text = String.slice(state.text, state.cursor_position..-1//1)
+        new_state = %{state | text: after_text, cursor_position: 0, scroll_offset: 0}
+        |> clear_selection()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :k, [:ctrl]} when state.focused ->
+        before_text = String.slice(state.text, 0, state.cursor_position)
+        new_state = %{state | text: before_text}
+        |> clear_selection()
+        trigger_change(new_state)
+        {:ok, new_state}
+
+      {:key, :w, [:ctrl]} when state.focused ->
+        new_state = delete_word_left(state)
+        trigger_change(new_state)
+        {:ok, new_state}
+
       {:key, :enter} when state.focused and state.on_submit != nil ->
         new_state = %{state | cursor_position: 0, scroll_offset: 0}
         actions =
@@ -386,7 +426,7 @@ defmodule Drafter.Widget.TextInput do
         {:noreply, state}
 
       {:key, :" "} when state.focused ->
-        if can_insert_char?(state) do
+        if can_insert_char?(state) and char_allowed?(state, " ") do
           if has_selection?(state) do
             insert_char_replace_selection(state, " ")
           else
@@ -411,7 +451,7 @@ defmodule Drafter.Widget.TextInput do
       {:char, char} when state.focused and is_integer(char) ->
         char_str = <<char::utf8>>
 
-        if printable_char?(char_str) and can_insert_char?(state) do
+        if printable_char?(char_str) and can_insert_char?(state) and char_allowed?(state, char_str) do
           if has_selection?(state) do
             insert_char_replace_selection(state, char_str)
           else
@@ -424,7 +464,7 @@ defmodule Drafter.Widget.TextInput do
       {:key, key} when state.focused and is_atom(key) ->
         char = Atom.to_string(key)
 
-        if printable_char?(char) and can_insert_char?(state) do
+        if printable_char?(char) and can_insert_char?(state) and char_allowed?(state, char) do
           if has_selection?(state) do
             insert_char_replace_selection(state, char)
           else
@@ -465,7 +505,14 @@ defmodule Drafter.Widget.TextInput do
         {:ok, %{state | focused: true}}
 
       {:focus} ->
-        {:ok, %{state | focused: true}}
+        new_state =
+          if state.select_on_focus do
+            text_length = String.length(state.text)
+            %{state | focused: true, selection_start: 0, selection_end: text_length, cursor_position: text_length}
+          else
+            %{state | focused: true}
+          end
+        {:ok, new_state}
 
       {:blur} ->
         new_state = %{state | focused: false, touched: true}
@@ -504,8 +551,39 @@ defmodule Drafter.Widget.TextInput do
         error: Map.get(props, :error, state.error),
         touched: Map.get(props, :touched, state.touched),
         disabled: Map.get(props, :disabled, state.disabled),
-        readonly: Map.get(props, :readonly, state.readonly)
+        readonly: Map.get(props, :readonly, state.readonly),
+        password: Map.get(props, :password, state.password),
+        restrict: compile_restrict(Map.get(props, :restrict, state.restrict)),
+        type: Map.get(props, :type, state.type),
+        select_on_focus: Map.get(props, :select_on_focus, state.select_on_focus)
     }
+  end
+
+  defp compile_restrict(nil), do: nil
+  defp compile_restrict(%Regex{} = r), do: r
+  defp compile_restrict(pattern) when is_binary(pattern), do: Regex.compile!(pattern)
+
+  defp type_restrict_pattern(:integer), do: ~r/^[0-9\-]$/
+  defp type_restrict_pattern(:number), do: ~r/^[0-9\.\-]$/
+  defp type_restrict_pattern(:text), do: nil
+
+  defp char_allowed?(state, char) do
+    type_pattern = type_restrict_pattern(state.type || :text)
+
+    type_ok =
+      case type_pattern do
+        nil -> true
+        pattern -> Regex.match?(pattern, char)
+      end
+
+    if not type_ok do
+      false
+    else
+      case state.restrict do
+        nil -> true
+        pattern -> Regex.match?(pattern, char)
+      end
+    end
   end
 
   defp validate_if_touched(state) do
@@ -529,20 +607,35 @@ defmodule Drafter.Widget.TextInput do
     end
   end
 
+  defp build_validation_result(state) do
+    case state.validators do
+      nil ->
+        {:ok, state.text}
+
+      validators ->
+        case Drafter.Validation.validate(state.text, validators) do
+          :ok -> {:ok, state.text}
+          {:error, message} -> {:error, [message]}
+        end
+    end
+  end
+
   defp get_display_text(state, content_width) do
     text = Map.get(state, :text, "")
     placeholder = Map.get(state, :placeholder, "")
     focused = Map.get(state, :focused, false)
     scroll_offset = Map.get(state, :scroll_offset, 0)
+    password = Map.get(state, :password, false)
 
-    # Show placeholder when text is empty and not focused
     if String.length(text) == 0 and not focused do
-      # Use placeholder style for placeholder text  
       String.slice(placeholder, 0, content_width)
     else
-      # Show actual text (may be empty when focused)
       visible_text = String.slice(text, scroll_offset, content_width)
-      visible_text
+      if password do
+        String.duplicate("•", String.length(visible_text))
+      else
+        visible_text
+      end
     end
   end
 
@@ -570,15 +663,12 @@ defmodule Drafter.Widget.TextInput do
     content_width = state.width
 
     cond do
-      # Cursor is to the left of visible area
       state.cursor_position < state.scroll_offset ->
         %{state | scroll_offset: state.cursor_position}
 
-      # Cursor is to the right of visible area
       state.cursor_position >= state.scroll_offset + content_width ->
         %{state | scroll_offset: state.cursor_position - content_width + 1}
 
-      # Cursor is within visible area
       true ->
         state
     end
@@ -609,8 +699,9 @@ defmodule Drafter.Widget.TextInput do
 
   defp trigger_change(state) do
     if state.on_change do
+      validation_result = build_validation_result(state)
       try do
-        state.on_change.(state.text)
+        state.on_change.({state.text, validation_result})
       rescue
         _error -> :ok
       end
@@ -619,8 +710,9 @@ defmodule Drafter.Widget.TextInput do
 
   defp trigger_submit(state) do
     if state.on_submit do
+      validation_result = build_validation_result(state)
       try do
-        state.on_submit.(state.text)
+        state.on_submit.({state.text, validation_result})
       rescue
         _error -> :ok
       end
@@ -881,6 +973,44 @@ defmodule Drafter.Widget.TextInput do
 
     trigger_change(new_state)
     {:ok, new_state}
+  end
+
+  defp delete_word_left(state) do
+    graphemes = String.graphemes(state.text)
+    pos = state.cursor_position
+
+    new_pos = find_word_left_boundary(graphemes, pos - 1)
+
+    before = String.slice(state.text, 0, new_pos)
+    after_text = String.slice(state.text, pos..-1//1)
+
+    %{state | text: before <> after_text, cursor_position: new_pos}
+    |> clear_selection()
+    |> adjust_scroll_offset()
+  end
+
+  defp find_word_left_boundary(_graphemes, index) when index < 0, do: 0
+
+  defp find_word_left_boundary(graphemes, index) do
+    char = Enum.at(graphemes, index, "")
+
+    if char == " " do
+      find_word_left_boundary(graphemes, index - 1)
+    else
+      find_word_left_non_space(graphemes, index)
+    end
+  end
+
+  defp find_word_left_non_space(_graphemes, index) when index < 0, do: 0
+
+  defp find_word_left_non_space(graphemes, index) do
+    char = Enum.at(graphemes, index, "")
+
+    if char != " " and index > 0 do
+      find_word_left_non_space(graphemes, index - 1)
+    else
+      if char == " ", do: index + 1, else: index
+    end
   end
 
   defp find_word_boundary(text, position, direction) do

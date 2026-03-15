@@ -54,7 +54,8 @@ defmodule Drafter.Widget.MaskedInput do
     :app_module,
     :focused,
     :cursor_pos,
-    :on_change
+    :on_change,
+    :on_submit
   ]
 
   @impl Drafter.Widget
@@ -73,7 +74,8 @@ defmodule Drafter.Widget.MaskedInput do
       app_module: Map.get(props, :app_module),
       focused: Map.get(props, :focused, false),
       cursor_pos: 0,
-      on_change: Map.get(props, :on_change)
+      on_change: Map.get(props, :on_change),
+      on_submit: Map.get(props, :on_submit)
     }
   end
 
@@ -245,6 +247,10 @@ defmodule Drafter.Widget.MaskedInput do
           {:noreply, state}
         end
 
+      {:key, :enter} when state.focused ->
+        trigger_submit(state)
+        {:ok, state}
+
       _ ->
         {:noreply, state}
     end
@@ -263,7 +269,8 @@ defmodule Drafter.Widget.MaskedInput do
         style: Map.get(props, :style, state.style),
         classes: Map.get(props, :classes, state.classes),
         app_module: Map.get(props, :app_module, state.app_module),
-        on_change: Map.get(props, :on_change, state.on_change)
+        on_change: Map.get(props, :on_change, state.on_change),
+        on_submit: Map.get(props, :on_submit, state.on_submit)
     }
   end
 
@@ -414,4 +421,11 @@ defmodule Drafter.Widget.MaskedInput do
   end
 
   defp trigger_change(_state), do: :ok
+
+  defp trigger_submit(%{on_submit: callback} = state) when is_function(callback, 1) do
+    value = get_unmasked_value(state)
+    callback.(value)
+  end
+
+  defp trigger_submit(_state), do: :ok
 end

@@ -15,6 +15,7 @@ defmodule Drafter.ComponentRenderer do
     DataTable,
     Tree,
     ProgressBar,
+    Rule,
     Switch,
     Digits,
     Markdown,
@@ -44,6 +45,44 @@ defmodule Drafter.ComponentRenderer do
 
   defp send_app_callback(callback_name, data) do
     {:app_callback, callback_name, data}
+  end
+
+  defp create_text_input_bound_callback(opts) do
+    session_pid = self()
+
+    case Keyword.get(opts, :bind) do
+      nil ->
+        case Keyword.get(opts, :on_change) do
+          nil ->
+            nil
+
+          callback ->
+            fn {text, validation_result} ->
+              send_bound_app_callback(session_pid, callback, {text, validation_result})
+            end
+        end
+
+      bind_key when is_atom(bind_key) ->
+        on_change = Keyword.get(opts, :on_change)
+
+        fn {text, validation_result} ->
+          send(session_pid, {:bound_state_update, bind_key, text})
+
+          if on_change do
+            send_bound_app_callback(session_pid, on_change, {text, validation_result})
+          end
+        end
+    end
+  end
+
+  defp send_bound_app_callback(session_pid, callback_name, data) do
+    case Drafter.ScreenManager.get_active_screen() do
+      nil ->
+        send(session_pid, {:app_event, callback_name, data})
+
+      _screen ->
+        send(session_pid, {:tui_event, {:app_callback, callback_name, data}})
+    end
   end
 
   @doc """
@@ -329,6 +368,10 @@ defmodule Drafter.ComponentRenderer do
         validators = Keyword.get(opts, :validators)
         disabled = Keyword.get(opts, :disabled, false)
         readonly = Keyword.get(opts, :readonly, false)
+        password = Keyword.get(opts, :password, false)
+        restrict = Keyword.get(opts, :restrict)
+        type = Keyword.get(opts, :type, :text)
+        select_on_focus = Keyword.get(opts, :select_on_focus, false)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
 
@@ -346,11 +389,15 @@ defmodule Drafter.ComponentRenderer do
           validators: validators,
           disabled: disabled,
           readonly: readonly,
-          on_change: Binding.create_bound_callback(opts, :text),
+          password: password,
+          restrict: restrict,
+          type: type,
+          select_on_focus: select_on_focus,
+          on_change: create_text_input_bound_callback(opts),
           on_submit:
             if on_submit do
               session_pid = self()
-              fn text ->
+              fn {text, _validation_result} ->
                 result = send_app_callback(on_submit, text)
                 if keep_focus, do: send(session_pid, {:focus_widget, widget_id})
                 result
@@ -370,7 +417,11 @@ defmodule Drafter.ComponentRenderer do
               classes: classes,
               validators: validators,
               disabled: disabled,
-              readonly: readonly
+              readonly: readonly,
+              password: password,
+              restrict: restrict,
+              type: type,
+              select_on_focus: select_on_focus
             }
 
             new_width = rect.width - 2
@@ -424,6 +475,11 @@ defmodule Drafter.ComponentRenderer do
         on_change = Keyword.get(opts, :on_change)
         height = Keyword.get(opts, :height, 6)
         show_line_numbers = Keyword.get(opts, :show_line_numbers, false)
+        read_only = Keyword.get(opts, :read_only, false)
+        tab_behavior = Keyword.get(opts, :tab_behavior, :focus)
+        tab_size = Keyword.get(opts, :tab_size, 2)
+        max_checkpoints = Keyword.get(opts, :max_checkpoints, 50)
+        highlight_cursor_line = Keyword.get(opts, :highlight_cursor_line, false)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
 
@@ -439,6 +495,11 @@ defmodule Drafter.ComponentRenderer do
           width: rect.width - 2,
           height: height,
           show_line_numbers: show_line_numbers,
+          read_only: read_only,
+          tab_behavior: tab_behavior,
+          tab_size: tab_size,
+          max_checkpoints: max_checkpoints,
+          highlight_cursor_line: highlight_cursor_line,
           classes: classes,
           on_change:
             if on_change do
@@ -448,14 +509,18 @@ defmodule Drafter.ComponentRenderer do
             end
         }
 
-        # Check if text area already exists and preserve its state
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             existing_state = WidgetHierarchy.get_widget_state(hierarchy, widget_id)
 
             updated_props = %{
               on_change: mount_props.on_change,
-              classes: classes
+              classes: classes,
+              read_only: read_only,
+              tab_behavior: tab_behavior,
+              tab_size: tab_size,
+              max_checkpoints: max_checkpoints,
+              highlight_cursor_line: highlight_cursor_line
             }
 
             new_width = rect.width - 2
@@ -508,6 +573,8 @@ defmodule Drafter.ComponentRenderer do
         on_select = Keyword.get(opts, :on_select)
         on_sort = Keyword.get(opts, :on_sort)
         on_layout_change = Keyword.get(opts, :on_layout_change)
+        on_row_highlight = Keyword.get(opts, :on_row_highlight)
+        on_header_select = Keyword.get(opts, :on_header_select)
         height = Keyword.get(opts, :height, 15)
         actual_height = if height == :auto, do: 8, else: height
 
@@ -526,6 +593,20 @@ defmodule Drafter.ComponentRenderer do
         wrapped_on_layout_change =
           if on_layout_change do
             fn layout -> send_app_callback(on_layout_change, layout) end
+          else
+            nil
+          end
+
+        wrapped_on_row_highlight =
+          if on_row_highlight do
+            fn row -> send_app_callback(on_row_highlight, row) end
+          else
+            nil
+          end
+
+        wrapped_on_header_select =
+          if on_header_select do
+            fn column_key -> send_app_callback(on_header_select, column_key) end
           else
             nil
           end
@@ -550,6 +631,8 @@ defmodule Drafter.ComponentRenderer do
               resizable: Keyword.get(opts, :resizable, true),
               col_widths: Keyword.get(opts, :col_widths),
               col_order: Keyword.get(opts, :col_order),
+              cursor_type: Keyword.get(opts, :cursor_type, :row),
+              cell_padding: Keyword.get(opts, :cell_padding, 0),
               classes: classes,
               on_select:
                 if on_select do
@@ -565,7 +648,9 @@ defmodule Drafter.ComponentRenderer do
                 else
                   nil
                 end,
-              on_layout_change: wrapped_on_layout_change
+              on_layout_change: wrapped_on_layout_change,
+              on_row_highlight: wrapped_on_row_highlight,
+              on_header_select: wrapped_on_header_select
             },
             themed_styles
           )
@@ -581,6 +666,10 @@ defmodule Drafter.ComponentRenderer do
               on_select: mount_props.on_select,
               on_sort: mount_props.on_sort,
               on_layout_change: wrapped_on_layout_change,
+              on_row_highlight: wrapped_on_row_highlight,
+              on_header_select: wrapped_on_header_select,
+              cursor_type: Keyword.get(opts, :cursor_type, :row),
+              cell_padding: Keyword.get(opts, :cell_padding, 0),
               col_widths: Keyword.get(opts, :col_widths),
               col_order: Keyword.get(opts, :col_order)
             }
@@ -619,6 +708,7 @@ defmodule Drafter.ComponentRenderer do
         data = Keyword.get(opts, :data, [])
         on_select = Keyword.get(opts, :on_select)
         on_expand = Keyword.get(opts, :on_expand)
+        on_node_highlight = Keyword.get(opts, :on_node_highlight)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
 
@@ -647,6 +737,12 @@ defmodule Drafter.ComponentRenderer do
               fn node, expanded -> send_app_callback(on_expand, {node, expanded}) end
             else
               nil
+            end,
+          on_node_highlight:
+            if on_node_highlight do
+              fn node -> send_app_callback(on_node_highlight, node) end
+            else
+              nil
             end
         }
 
@@ -658,7 +754,8 @@ defmodule Drafter.ComponentRenderer do
               data: data,
               classes: classes,
               on_select: mount_props.on_select,
-              on_expand: mount_props.on_expand
+              on_expand: mount_props.on_expand,
+              on_node_highlight: mount_props.on_node_highlight
             }
 
             updated_props =
@@ -1245,26 +1342,37 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:rule, opts} ->
-        widget_id = :"rule_#{id_counter}"
-        char = Keyword.get(opts, :char, "─")
-        custom_style = Keyword.get(opts, :style, %{})
-        themed_style = %{fg: theme.border, bg: theme.background}
-        merged_style = Map.merge(themed_style, custom_style)
+        widget_id = Keyword.get(opts, :id, :"rule_#{id_counter}")
 
-        text = String.duplicate(char, rect.width)
-        mount_props = %{text: text, style: merged_style}
+        mount_props = %{
+          orientation: Keyword.get(opts, :orientation, :horizontal),
+          title: Keyword.get(opts, :title),
+          title_align: Keyword.get(opts, :title_align, :center),
+          style: Keyword.get(opts, :style, %{}),
+          line_style: Keyword.get(opts, :line_style, :solid),
+          app_module: app_module
+        }
+
+        update_props = %{
+          orientation: mount_props.orientation,
+          title: mount_props.title,
+          title_align: mount_props.title_align,
+          style: mount_props.style,
+          line_style: mount_props.line_style,
+          app_module: app_module
+        }
 
         new_hierarchy =
           if Map.has_key?(hierarchy.widgets, widget_id) do
             hierarchy
             |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
-            |> WidgetHierarchy.update_widget(widget_id, %{text: text, style: merged_style})
+            |> WidgetHierarchy.update_widget(widget_id, update_props)
           else
             WidgetHierarchy.add_widget(
               hierarchy,
               widget_id,
-              Label,
+              Rule,
               mount_props,
               parent_id,
               rect
@@ -1378,6 +1486,7 @@ defmodule Drafter.ComponentRenderer do
       {:selection_list, options, opts} ->
         widget_id = Keyword.get(opts, :id, :"selection_list_#{id_counter}")
         on_change = Keyword.get(opts, :on_change)
+        on_item_toggle = Keyword.get(opts, :on_item_toggle)
         selected = Keyword.get(opts, :selected, [])
         selection_mode = Keyword.get(opts, :selection_mode, :multiple)
         raw_classes = Keyword.get(opts, :class, [])
@@ -1400,6 +1509,14 @@ defmodule Drafter.ComponentRenderer do
               fn values -> send_app_callback(on_change, values) end
             else
               nil
+            end,
+          on_item_toggle:
+            if on_item_toggle do
+              fn index, new_selected_state ->
+                send_app_callback(on_item_toggle, {index, new_selected_state})
+              end
+            else
+              nil
             end
         }
 
@@ -1410,6 +1527,7 @@ defmodule Drafter.ComponentRenderer do
             |> WidgetHierarchy.update_widget_rect(widget_id, rect)
             |> WidgetHierarchy.update_widget(widget_id, %{
               on_change: mount_props.on_change,
+              on_item_toggle: mount_props.on_item_toggle,
               selection_mode: selection_mode,
               classes: classes
             })
@@ -1806,6 +1924,7 @@ defmodule Drafter.ComponentRenderer do
 
       {:masked_input, opts} ->
         widget_id = Keyword.get(opts, :id, :"masked_input_#{id_counter}")
+        raw_on_submit = Keyword.get(opts, :on_submit)
 
         mount_props = %{
           mask: Keyword.get(opts, :mask),
@@ -1814,7 +1933,13 @@ defmodule Drafter.ComponentRenderer do
           style: Keyword.get(opts, :style),
           classes: Keyword.get(opts, :classes, []),
           app_module: app_module,
-          on_change: Keyword.get(opts, :on_change)
+          on_change: Keyword.get(opts, :on_change),
+          on_submit:
+            if raw_on_submit do
+              fn value -> send_app_callback(raw_on_submit, value) end
+            else
+              nil
+            end
         }
 
         new_hierarchy =
@@ -1822,7 +1947,8 @@ defmodule Drafter.ComponentRenderer do
             existing_state = WidgetHierarchy.get_widget_state(hierarchy, widget_id)
 
             updated_props = %{
-              on_change: mount_props.on_change
+              on_change: mount_props.on_change,
+              on_submit: mount_props.on_submit
             }
 
             updated_props =
@@ -2664,8 +2790,8 @@ defmodule Drafter.ComponentRenderer do
         lines = String.split(content, "\n") |> length()
         Keyword.get(opts, :height, max(lines, 3))
 
-      {:rule, _opts} ->
-        1
+      {:rule, opts} ->
+        Keyword.get(opts, :height, 1)
 
       {:placeholder, opts} ->
         Keyword.get(opts, :height, 3)

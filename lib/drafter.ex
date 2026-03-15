@@ -33,7 +33,7 @@ defmodule Drafter do
   """
 
   alias Drafter.{Terminal, Event, Compositor, ComponentRenderer, ThemeManager}
-  alias Drafter.Widget.{Label, Button, Container, Digits, Grid, Placeholder, Markdown, Footer}
+  alias Drafter.Widget.{Label, Button, Container, Digits, Grid, Placeholder, Markdown, Footer, Rule}
 
   @doc "Start a TUI application"
   @spec run(module(), keyword()) :: :ok
@@ -106,6 +106,12 @@ defmodule Drafter do
   def placeholder(text, opts \\ []) do
     props = %{text: text} |> Map.merge(Map.new(opts))
     {Placeholder, props}
+  end
+
+  @doc "Create a rule (divider line) widget"
+  @spec rule(keyword()) :: {Rule, map()}
+  def rule(opts \\ []) do
+    {Rule, Map.new(opts)}
   end
 
   @doc "Create a markdown widget"

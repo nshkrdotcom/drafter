@@ -3,7 +3,7 @@ defmodule Drafter.Widget.ButtonTest do
   alias Drafter.ThemeManager
 
   alias Drafter.Widget.Button
-  alias Drafter.Draw.{Segment, Strip}
+  alias Drafter.Draw.Strip
 
   setup do
     case start_supervised(ThemeManager) do

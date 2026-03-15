@@ -83,6 +83,7 @@ defmodule Drafter.Widget.Tree do
     :selection_mode,
     :on_select,
     :on_expand,
+    :on_node_highlight,
     :show_icons,
     :indent_size,
     :width,
@@ -115,6 +116,7 @@ defmodule Drafter.Widget.Tree do
           selection_mode: selection_mode(),
           on_select: ([tree_node()] -> term()) | nil,
           on_expand: (tree_node(), boolean() -> term()) | nil,
+          on_node_highlight: (tree_node() -> term()) | nil,
           show_icons: boolean(),
           indent_size: pos_integer(),
           width: pos_integer(),
@@ -149,6 +151,7 @@ defmodule Drafter.Widget.Tree do
       selection_mode: Map.get(props, :selection_mode, :single),
       on_select: Map.get(props, :on_select),
       on_expand: Map.get(props, :on_expand),
+      on_node_highlight: Map.get(props, :on_node_highlight),
       show_icons: Map.get(props, :show_icons, true),
       indent_size: Map.get(props, :indent_size, 2),
       width: Map.get(props, :width, 80),
@@ -206,6 +209,12 @@ defmodule Drafter.Widget.Tree do
 
       {:key, :down} when state.focused ->
         move_cursor_down(state)
+
+      {:key, {:shift, :left}} when state.focused ->
+        move_to_prev_sibling(state)
+
+      {:key, {:shift, :right}} when state.focused ->
+        move_to_next_sibling(state)
 
       {:key, :left} when state.focused ->
         collapse_current_node(state)
@@ -269,6 +278,7 @@ defmodule Drafter.Widget.Tree do
         collapsed_style: Map.get(props, :collapsed_style, state.collapsed_style),
         on_select: Map.get(props, :on_select, state.on_select),
         on_expand: Map.get(props, :on_expand, state.on_expand),
+        on_node_highlight: Map.get(props, :on_node_highlight, state.on_node_highlight),
         show_icons: Map.get(props, :show_icons, state.show_icons),
         indent_size: Map.get(props, :indent_size, state.indent_size),
         width: Map.get(props, :width, state.width),
@@ -280,10 +290,14 @@ defmodule Drafter.Widget.Tree do
 
   defp move_cursor_up(state) do
     if state.cursor_index > 0 do
+      new_index = state.cursor_index - 1
+
       new_state =
-        %{state | cursor_index: state.cursor_index - 1}
+        %{state | cursor_index: new_index}
         |> adjust_scroll_vertical()
 
+      display_items = flatten_for_display(new_state)
+      trigger_node_highlight(new_state, Enum.at(display_items, new_index))
       {:ok, new_state}
     else
       {:noreply, state}
@@ -295,10 +309,13 @@ defmodule Drafter.Widget.Tree do
     max_index = length(display_items) - 1
 
     if state.cursor_index < max_index do
+      new_index = state.cursor_index + 1
+
       new_state =
-        %{state | cursor_index: state.cursor_index + 1}
+        %{state | cursor_index: new_index}
         |> adjust_scroll_vertical()
 
+      trigger_node_highlight(new_state, Enum.at(display_items, new_index))
       {:ok, new_state}
     else
       {:noreply, state}
@@ -437,6 +454,7 @@ defmodule Drafter.Widget.Tree do
     if clicked_index >= 0 && clicked_index < length(display_items) do
       new_state = %{state | cursor_index: clicked_index, focused: true}
       current_item = Enum.at(display_items, clicked_index)
+      trigger_node_highlight(new_state, current_item)
 
       if current_item.children && length(current_item.children) > 0 do
         if MapSet.member?(new_state.expanded_nodes, current_item.id) do
@@ -629,6 +647,89 @@ defmodule Drafter.Widget.Tree do
       rescue
         _error -> :ok
       end
+    end
+  end
+
+  defp trigger_node_highlight(state, node) do
+    if state.on_node_highlight && node do
+      try do
+        state.on_node_highlight.(node)
+      rescue
+        _error -> :ok
+      end
+    end
+  end
+
+  defp move_to_prev_sibling(state) do
+    display_items = flatten_for_display(state)
+    current_item = Enum.at(display_items, state.cursor_index)
+
+    case current_item do
+      nil ->
+        {:noreply, state}
+
+      item ->
+        current_depth = item.depth
+
+        prev_sibling_index =
+          display_items
+          |> Enum.take(state.cursor_index)
+          |> Enum.with_index()
+          |> Enum.filter(fn {candidate, _idx} -> candidate.depth == current_depth end)
+          |> List.last()
+          |> case do
+            {_node, idx} -> idx
+            nil -> nil
+          end
+
+        case prev_sibling_index do
+          nil ->
+            {:noreply, state}
+
+          new_index ->
+            new_state =
+              %{state | cursor_index: new_index}
+              |> adjust_scroll_vertical()
+
+            trigger_node_highlight(new_state, Enum.at(display_items, new_index))
+            {:ok, new_state}
+        end
+    end
+  end
+
+  defp move_to_next_sibling(state) do
+    display_items = flatten_for_display(state)
+    current_item = Enum.at(display_items, state.cursor_index)
+
+    case current_item do
+      nil ->
+        {:noreply, state}
+
+      item ->
+        current_depth = item.depth
+
+        next_sibling_index =
+          display_items
+          |> Enum.with_index()
+          |> Enum.drop(state.cursor_index + 1)
+          |> Enum.find(fn {candidate, _idx} -> candidate.depth == current_depth end)
+          |> case do
+            {_node, idx} -> idx
+            nil -> nil
+          end
+
+        case next_sibling_index do
+          nil ->
+            {:noreply, state}
+
+          new_index ->
+            new_state =
+              %{state | cursor_index: new_index}
+              |> adjust_scroll_vertical()
+
+            trigger_node_highlight(new_state, Enum.at(display_items, new_index))
+            {:ok, new_state}
+        end
     end
   end
 
