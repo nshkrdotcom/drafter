@@ -3,6 +3,12 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.18] - 2026-03-15
+### Fixed
+- `Collapsible`: widget content (list) no longer renders over siblings below it — two root causes fixed:
+  - `Collapsible.update/2` was resetting `content_height` to the default (10) on every re-render when only `content` was passed in `updated_props`, corrupting the stored height after the first render
+  - `get_child_vertical_spec` / `get_preferred_height` ignored the `expanded:` and `content_height:` options when the widget was not yet in the hierarchy (first render), always returning height 1 and placing the next sibling at the wrong y position
+
 ## [0.1.17] - 2026-03-15
 ### Added
 - `Digits`: `bg_data:` prop renders a braille line chart (4× vertical resolution per terminal row) behind the digit glyphs; `color:` sets the line colour; digits take priority where glyphs overlap braille dots

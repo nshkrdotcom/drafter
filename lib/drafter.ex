@@ -1625,8 +1625,13 @@ defmodule Drafter do
 
   defp update_widget_preferred_size(hierarchy, widget_id, module, state) do
     case {module, state} do
-      {Drafter.Widget.Collapsible, %{expanded: true, content: content}} ->
-        lines = if is_binary(content), do: length(String.split(content, "\n")), else: 1
+      {Drafter.Widget.Collapsible, %{expanded: true, content: content, content_height: content_height}} ->
+        lines =
+          cond do
+            is_binary(content) -> length(String.split(content, "\n"))
+            is_list(content) -> content_height || 10
+            true -> 1
+          end
         preferred_size = 1 + lines
 
         Drafter.WidgetHierarchy.update_preferred_size(hierarchy, widget_id, preferred_size)

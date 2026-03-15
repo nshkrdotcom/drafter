@@ -119,14 +119,10 @@ defmodule Drafter.Widget.Collapsible do
   end
 
   def update(props, state) do
-    new_content = Map.get(props, :content, state.content)
-
     new_content_height =
-      cond do
-        Map.has_key?(props, :content_height) -> props.content_height
-        Map.has_key?(props, :content) -> default_content_height(new_content)
-        true -> state.content_height
-      end
+      if Map.has_key?(props, :content_height),
+        do: props.content_height,
+        else: state.content_height
 
     state
     |> Map.merge(props)

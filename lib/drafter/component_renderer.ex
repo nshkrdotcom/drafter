@@ -2646,7 +2646,7 @@ defmodule Drafter.ComponentRenderer do
 
         {preferred, max(flex, 1), has_flex}
 
-      {:collapsible, title, _content, _opts} ->
+      {:collapsible, title, content, opts} ->
         preferred =
           if hierarchy do
             collapsible_state = find_collapsible_state(hierarchy, title)
@@ -2654,6 +2654,16 @@ defmodule Drafter.ComponentRenderer do
             case collapsible_state do
               %{expanded: true} ->
                 estimate_collapsible_height(collapsible_state)
+
+              nil ->
+                if Keyword.get(opts, :expanded, false) do
+                  estimate_collapsible_height(%{
+                    content: content,
+                    content_height: Keyword.get(opts, :content_height)
+                  })
+                else
+                  1
+                end
 
               _ ->
                 1
@@ -2823,13 +2833,23 @@ defmodule Drafter.ComponentRenderer do
       {:selection_list, options, opts} ->
         Keyword.get(opts, :height, min(length(options), 5))
 
-      {:collapsible, title, _content, _opts} ->
+      {:collapsible, title, content, opts} ->
         if hierarchy do
           collapsible_state = find_collapsible_state(hierarchy, title)
 
           case collapsible_state do
             %{expanded: true} ->
               estimate_collapsible_height(collapsible_state)
+
+            nil ->
+              if Keyword.get(opts, :expanded, false) do
+                estimate_collapsible_height(%{
+                  content: content,
+                  content_height: Keyword.get(opts, :content_height)
+                })
+              else
+                1
+              end
 
             _ ->
               1
