@@ -35,6 +35,8 @@ defmodule Drafter do
   alias Drafter.{Terminal, Event, Compositor, ComponentRenderer, ThemeManager}
   alias Drafter.Widget.{Label, Button, Container, Digits, Grid, Placeholder, Markdown, Footer, Rule}
 
+  @scroll_debounce_ms 150
+
   @doc "Start a TUI application"
   @spec run(module(), keyword()) :: :ok
   def run(app_module, opts \\ []) when is_atom(app_module) do
@@ -416,8 +418,14 @@ defmodule Drafter do
               end)
 
             if widget_consumed do
-              {_, final_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy_after_callbacks)
-              shared_session_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy, shared_state_pid, mount_props, new_bindings)
+              if :scroll_fast_render in actions do
+                render_hierarchy(new_hierarchy_after_callbacks, screen_rect)
+                reschedule_scroll_debounce()
+                shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy_after_callbacks, shared_state_pid, mount_props, new_bindings)
+              else
+                {_, final_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy_after_callbacks)
+                shared_session_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy, shared_state_pid, mount_props, new_bindings)
+              end
             else
               {result_state, should_stop} = handle_shared_event(app_module, event, new_app_state, shared_state_pid)
 
@@ -482,6 +490,16 @@ defmodule Drafter do
         else
           {_, new_hierarchy} = render_app(app_module, new_app_state, screen_rect, widget_hierarchy)
           shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy, shared_state_pid, mount_props, local_bindings)
+        end
+
+      :scroll_debounce_render ->
+        Process.delete(:scroll_debounce_ref)
+
+        if widget_hierarchy do
+          {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, widget_hierarchy)
+          shared_session_loop(app_module, app_state, screen_rect, timers, updated_hierarchy, shared_state_pid, mount_props, local_bindings)
+        else
+          shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
         end
 
       _other ->
@@ -635,10 +653,16 @@ defmodule Drafter do
                     _, acc_state -> acc_state
                   end)
 
-                {_, final_hierarchy} =
-                  render_app(app_module, new_app_state, screen_rect, updated_hierarchy)
+                if :scroll_fast_render in actions do
+                  render_hierarchy(updated_hierarchy, screen_rect)
+                  reschedule_scroll_debounce()
+                  app_event_loop(app_module, new_app_state, screen_rect, timers, updated_hierarchy)
+                else
+                  {_, final_hierarchy} =
+                    render_app(app_module, new_app_state, screen_rect, updated_hierarchy)
 
-                app_event_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy)
+                  app_event_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy)
+                end
               else
                 case app_module.handle_event(event, app_state) do
                   {:ok, new_app_state} ->
@@ -818,6 +842,16 @@ defmodule Drafter do
         if widget_hierarchy do
           updated_hierarchy = sync_widget_states(widget_hierarchy)
           render_hierarchy(updated_hierarchy, screen_rect)
+          app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
+        else
+          app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+        end
+
+      :scroll_debounce_render ->
+        Process.delete(:scroll_debounce_ref)
+
+        if widget_hierarchy do
+          {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, widget_hierarchy)
           app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
         else
           app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
@@ -1111,6 +1145,16 @@ defmodule Drafter do
     end)
   end
 
+
+  defp reschedule_scroll_debounce do
+    case Process.get(:scroll_debounce_ref) do
+      nil -> :ok
+      ref -> Process.cancel_timer(ref)
+    end
+
+    new_ref = Process.send_after(self(), :scroll_debounce_render, @scroll_debounce_ms)
+    Process.put(:scroll_debounce_ref, new_ref)
+  end
 
   defp make_screen_rect(width, height) do
     %{x: 0, y: 0, width: width, height: height}

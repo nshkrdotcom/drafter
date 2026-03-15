@@ -3,6 +3,11 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.19] - 2026-03-16
+### Changed
+- `WidgetServer`: `get_render` now caches rendered strips per widget — the cache is invalidated only when widget state or rect changes; if state is unchanged (e.g., during scroll), `get_render` returns the cached result without calling `Widget.render/2`; `update_props` with identical resulting state preserves the existing cache entry
+- `ScrollableContainer`: scroll events (mouse wheel, keyboard up/down/page) use a fast render path — `render_hierarchy` re-clips existing cached strips at the new offset without running `ComponentRenderer`; a 150 ms debounce fires `render_app` once after scroll settles to refresh any newly visible content
+
 ## [0.1.18] - 2026-03-15
 ### Fixed
 - `DataTable`: click and Enter now toggle selection in both `:single` and `:multiple` modes — clicking or pressing Enter on an already-selected row deselects it; previously `change_selection/3` always set selection, while Space already toggled correctly via `action_toggle_selection`

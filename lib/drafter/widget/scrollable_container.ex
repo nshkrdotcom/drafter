@@ -175,7 +175,7 @@ defmodule Drafter.Widget.ScrollableContainer do
         scroll_offset_y: state.scroll_offset_y + dy
     }
 
-    {:ok, clamp_scroll(new_state)}
+    {:ok, clamp_scroll(new_state), [:scroll_fast_render]}
   end
 
   defp clamp_scroll(state) do
