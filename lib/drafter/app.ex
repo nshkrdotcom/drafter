@@ -35,10 +35,16 @@ defmodule Drafter.App do
   @doc "Called on timer intervals"
   @callback on_timer(atom(), state()) :: state()
 
+  @doc "Called on the first scroll event of a scroll gesture"
+  @callback on_scroll_active(state()) :: state()
+
+  @doc "Called when scrolling is idle (debounce settled)"
+  @callback on_scroll_idle(state()) :: state()
+
   @doc "Cleanup application resources"
   @callback unmount(state()) :: :ok
 
-  @optional_callbacks [update: 2, unmount: 1, on_ready: 1, on_timer: 2, handle_event: 3]
+  @optional_callbacks [update: 2, unmount: 1, on_ready: 1, on_timer: 2, handle_event: 3, on_scroll_active: 1, on_scroll_idle: 1]
 
   defmacro __using__(opts) do
     quote do

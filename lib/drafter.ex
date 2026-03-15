@@ -419,9 +419,10 @@ defmodule Drafter do
 
             if widget_consumed do
               if :scroll_fast_render in actions do
+                scrolled_app_state = maybe_scroll_active(app_module, new_app_state)
                 render_hierarchy(new_hierarchy_after_callbacks, screen_rect)
                 reschedule_scroll_debounce()
-                shared_session_loop(app_module, new_app_state, screen_rect, timers, new_hierarchy_after_callbacks, shared_state_pid, mount_props, new_bindings)
+                shared_session_loop(app_module, scrolled_app_state, screen_rect, timers, new_hierarchy_after_callbacks, shared_state_pid, mount_props, new_bindings)
               else
                 {_, final_hierarchy} = render_app(app_module, new_app_state, screen_rect, new_hierarchy_after_callbacks)
                 shared_session_loop(app_module, new_app_state, screen_rect, timers, final_hierarchy, shared_state_pid, mount_props, new_bindings)
@@ -495,12 +496,13 @@ defmodule Drafter do
       :scroll_debounce_render ->
         drain_scroll_debounce_renders()
         Process.delete(:scroll_debounce_ref)
+        idle_app_state = maybe_scroll_idle(app_module, app_state)
 
         if widget_hierarchy do
-          {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, widget_hierarchy)
-          shared_session_loop(app_module, app_state, screen_rect, timers, updated_hierarchy, shared_state_pid, mount_props, local_bindings)
+          {_, updated_hierarchy} = render_app(app_module, idle_app_state, screen_rect, widget_hierarchy)
+          shared_session_loop(app_module, idle_app_state, screen_rect, timers, updated_hierarchy, shared_state_pid, mount_props, local_bindings)
         else
-          shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+          shared_session_loop(app_module, idle_app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
         end
 
       _other ->
@@ -657,9 +659,10 @@ defmodule Drafter do
                   end)
 
                 if :scroll_fast_render in actions do
+                  scrolled_app_state = maybe_scroll_active(app_module, new_app_state)
                   render_hierarchy(updated_hierarchy, screen_rect)
                   reschedule_scroll_debounce()
-                  app_event_loop(app_module, new_app_state, screen_rect, timers, updated_hierarchy)
+                  app_event_loop(app_module, scrolled_app_state, screen_rect, timers, updated_hierarchy)
                 else
                   {_, final_hierarchy} =
                     render_app(app_module, new_app_state, screen_rect, updated_hierarchy)
@@ -854,12 +857,13 @@ defmodule Drafter do
       :scroll_debounce_render ->
         drain_scroll_debounce_renders()
         Process.delete(:scroll_debounce_ref)
+        idle_app_state = maybe_scroll_idle(app_module, app_state)
 
         if widget_hierarchy do
-          {_, updated_hierarchy} = render_app(app_module, app_state, screen_rect, widget_hierarchy)
-          app_event_loop(app_module, app_state, screen_rect, timers, updated_hierarchy)
+          {_, updated_hierarchy} = render_app(app_module, idle_app_state, screen_rect, widget_hierarchy)
+          app_event_loop(app_module, idle_app_state, screen_rect, timers, updated_hierarchy)
         else
-          app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+          app_event_loop(app_module, idle_app_state, screen_rect, timers, widget_hierarchy)
         end
 
       {:widget_action, _widget_id, {:theme_change, theme_name}} ->
@@ -1160,6 +1164,30 @@ defmodule Drafter do
       :scroll_debounce_render -> drain_scroll_debounce_renders()
     after
       0 -> :ok
+    end
+  end
+
+  defp maybe_scroll_active(app_module, app_state) do
+    if Process.get(:scroll_gesture_active) do
+      app_state
+    else
+      Process.put(:scroll_gesture_active, true)
+
+      if function_exported?(app_module, :on_scroll_active, 1) do
+        app_module.on_scroll_active(app_state)
+      else
+        app_state
+      end
+    end
+  end
+
+  defp maybe_scroll_idle(app_module, app_state) do
+    Process.delete(:scroll_gesture_active)
+
+    if function_exported?(app_module, :on_scroll_idle, 1) do
+      app_module.on_scroll_idle(app_state)
+    else
+      app_state
     end
   end
 

@@ -3,6 +3,29 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.21] - 2026-03-16
+### Added
+- `Drafter.App`: `on_scroll_active/1` optional callback — fires once on the first scroll event of a gesture; return updated state (e.g. `%{state | scrolling: true}`)
+- `Drafter.App`: `on_scroll_idle/1` optional callback — fires when the 150 ms debounce settles after the last scroll event; return updated state (e.g. flush pending data, clear scrolling flag)
+
+These hooks let apps pause expensive work (data hydration, heavy renders) during scroll and resume it precisely when the gesture ends, without polling or timers.
+
+```elixir
+def on_scroll_active(state), do: %{state | scrolling: true}
+
+def on_scroll_idle(state) do
+  state = if state.pending_data, do: apply_pending_data(state), else: state
+  %{state | scrolling: false, pending_data: nil}
+end
+
+def on_timer(:poll_data, %{scrolling: true} = state) do
+  case DataCache.take_if_updated(state.selected_uid, state.data_version) do
+    :unchanged -> state
+    {:updated, payload} -> %{state | pending_data: payload}
+  end
+end
+```
+
 ## [0.1.20] - 2026-03-16
 ### Fixed
 - `WidgetServer`: `event_sync` no longer calls `notify_render_needed` — the event loop renders after `event_sync` returns; calling it again was flooding the mailbox with one `{:widget_render_needed}` per scroll tick
