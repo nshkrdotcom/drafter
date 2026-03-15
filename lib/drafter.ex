@@ -37,7 +37,17 @@ defmodule Drafter do
 
   @scroll_debounce_ms 150
 
-  @doc "Start a TUI application"
+  @doc """
+  Start a TUI application.
+
+  Options:
+    * `:scroll_optimization` - `true` (default) uses a fast render path during
+      scroll gestures (`render_hierarchy` from ETS) and defers a full `render_app`
+      until 150 ms after the last scroll event. Set to `false` to disable and
+      trigger a full `render_app` on every scroll tick — maximum freshness at the
+      cost of higher CPU during scroll.
+    * `:syntax_highlighting` - `true` to enable tree-sitter syntax highlighting.
+  """
   @spec run(module(), keyword()) :: :ok
   def run(app_module, opts \\ []) when is_atom(app_module) do
     # Initialize file logging for debugging
@@ -327,6 +337,8 @@ defmodule Drafter do
 
     {mode, opts} = Keyword.pop(opts, :mode, :isolated)
     {shared_state, opts} = Keyword.pop(opts, :shared_state)
+    {scroll_opt, opts} = Keyword.pop(opts, :scroll_optimization, true)
+    Process.put(:scroll_optimization, scroll_opt)
 
     mount_props = Map.new(opts)
 
@@ -418,7 +430,7 @@ defmodule Drafter do
               end)
 
             if widget_consumed do
-              if :scroll_fast_render in actions do
+              if :scroll_fast_render in actions and scroll_optimization_enabled?() do
                 scrolled_app_state = maybe_scroll_active(app_module, new_app_state)
                 render_hierarchy(new_hierarchy_after_callbacks, screen_rect)
                 reschedule_scroll_debounce()
@@ -579,9 +591,12 @@ defmodule Drafter do
   defp ensure_started({:error, {:already_started, pid}}), do: {:ok, pid}
   defp ensure_started(error), do: error
 
-  defp run_app(app_module, _opts) do
+  defp run_app(app_module, opts) do
+    scroll_opt = Keyword.get(opts, :scroll_optimization, true)
+
     app_pid =
       spawn_link(fn ->
+        Process.put(:scroll_optimization, scroll_opt)
         run_app_loop(app_module)
       end)
 
@@ -659,7 +674,7 @@ defmodule Drafter do
                     _, acc_state -> acc_state
                   end)
 
-                if :scroll_fast_render in actions do
+                if :scroll_fast_render in actions and scroll_optimization_enabled?() do
                   scrolled_app_state = maybe_scroll_active(app_module, new_app_state)
                   render_hierarchy(updated_hierarchy, screen_rect)
                   reschedule_scroll_debounce()
@@ -1168,6 +1183,8 @@ defmodule Drafter do
       0 -> :ok
     end
   end
+
+  defp scroll_optimization_enabled?, do: Process.get(:scroll_optimization, true) != false
 
   defp maybe_on_message(app_module, msg, app_state) do
     if function_exported?(app_module, :on_message, 2) do

@@ -3,6 +3,14 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.23] - 2026-03-16
+### Added
+- `Drafter.run/2`: `scroll_optimization: false` opt-out — disables the fast render path and debounce, reverting to a full `render_app` on every scroll tick. Default is `true` (optimisation enabled). `run_session/3` accepts the same option.
+
+```elixir
+Drafter.run(MyApp, scroll_optimization: false)
+```
+
 ## [0.1.22] - 2026-03-16
 ### Added
 - `Drafter.App`: `on_message/2` optional callback — receives any process message that is not a recognised drafter event (resize, keyboard/mouse input, widget signals, timers). Enables PubSub subscriptions, `send/2` from external processes, and GenServer-style messaging directly in the app process. Return updated state.

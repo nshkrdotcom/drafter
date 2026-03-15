@@ -232,4 +232,4 @@ defmodule ThemeSandbox do
   end
 end
 
-Drafter.run(ThemeSandbox)
+Drafter.run(ThemeSandbox, scroll_optimization: false)
