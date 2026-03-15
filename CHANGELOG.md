@@ -3,6 +3,23 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.22] - 2026-03-16
+### Added
+- `Drafter.App`: `on_message/2` optional callback — receives any process message that is not a recognised drafter event (resize, keyboard/mouse input, widget signals, timers). Enables PubSub subscriptions, `send/2` from external processes, and GenServer-style messaging directly in the app process. Return updated state.
+
+```elixir
+def mount(_props) do
+  Phoenix.PubSub.subscribe(MyApp.PubSub, "data:updates")
+  %{rows: []}
+end
+
+def on_message({:data_refreshed, uid, payload}, state) do
+  %{state | rows: payload.rows}
+end
+```
+
+Previously all unrecognised messages were silently dropped at the `_other` catch-all in both `app_event_loop` and `shared_session_loop`.
+
 ## [0.1.21] - 2026-03-16
 ### Added
 - `Drafter.App`: `on_scroll_active/1` optional callback — fires once on the first scroll event of a gesture; return updated state (e.g. `%{state | scrolling: true}`)

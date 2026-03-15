@@ -505,8 +505,9 @@ defmodule Drafter do
           shared_session_loop(app_module, idle_app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
         end
 
-      _other ->
-        shared_session_loop(app_module, app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
+      other ->
+        new_app_state = maybe_on_message(app_module, other, app_state)
+        shared_session_loop(app_module, new_app_state, screen_rect, timers, widget_hierarchy, shared_state_pid, mount_props, local_bindings)
     end
   end
 
@@ -1022,8 +1023,9 @@ defmodule Drafter do
         render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
         app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
 
-      _other ->
-        app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+      other ->
+        new_app_state = maybe_on_message(app_module, other, app_state)
+        app_event_loop(app_module, new_app_state, screen_rect, timers, widget_hierarchy)
     end
   end
 
@@ -1164,6 +1166,14 @@ defmodule Drafter do
       :scroll_debounce_render -> drain_scroll_debounce_renders()
     after
       0 -> :ok
+    end
+  end
+
+  defp maybe_on_message(app_module, msg, app_state) do
+    if function_exported?(app_module, :on_message, 2) do
+      app_module.on_message(msg, app_state)
+    else
+      app_state
     end
   end
 
