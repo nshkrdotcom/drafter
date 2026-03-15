@@ -422,8 +422,11 @@ defmodule Drafter.WidgetHierarchy do
   @doc "Find widget at coordinates (hit testing)"
   @spec find_widget_at(t(), integer(), integer()) :: widget_id() | nil
   def find_widget_at(hierarchy, x, y) do
+    hidden = Map.get(hierarchy, :hidden_widgets, MapSet.new())
+
     candidates =
       hierarchy.widget_rects
+      |> Enum.reject(fn {id, _rect} -> MapSet.member?(hidden, id) end)
       |> Enum.map(fn {id, rect} ->
         {id, translate_rect_to_screen(hierarchy, id, rect)}
       end)

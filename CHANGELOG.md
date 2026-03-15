@@ -5,6 +5,7 @@ Versions marked with ★ were published to Hex.pm.
 
 ## [0.1.18] - 2026-03-15
 ### Fixed
+- `Collapsible`: hidden children no longer receive mouse events — `find_widget_at` now excludes `hidden_widgets` from hit testing, preventing clicks intended for widgets beneath a collapsed section (e.g. a `DataTable` header) from being intercepted by invisible child widgets
 - `Collapsible`: widget content (list) no longer renders over siblings below it — two root causes fixed:
   - `Collapsible.update/2` was resetting `content_height` to the default (10) on every re-render when only `content` was passed in `updated_props`, corrupting the stored height after the first render
   - `get_child_vertical_spec` / `get_preferred_height` ignored the `expanded:` and `content_height:` options when the widget was not yet in the hierarchy (first render), always returning height 1 and placing the next sibling at the wrong y position
