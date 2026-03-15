@@ -3,7 +3,7 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## [Unreleased]
+## [0.1.15] - 2026-03-15
 ### Added
 - `DataTable`: per-cell background colouring via `color_fn: (raw_value -> {r,g,b} | nil)` on column definitions; applied when the row is not selected
 - `DataTable`: 3-state column sort cycle — click cycles ascending → descending → unsorted (restores original data order); `↕` indicator shown on all sortable-but-unsorted columns when `sortable: true`
@@ -14,6 +14,8 @@ Versions marked with ★ were published to Hex.pm.
 - `DataTable`: `on_layout_change:` callback — fires with `%{col_widths: [...], col_order: [...]}` after any resize or reorder
 - `DataTable`: `col_widths:` and `col_order:` mount/update props to restore a previously saved layout
 - `DataTable`: keyboard resize (`+`/`-`) fires `on_layout_change` after each step
+- `DataTable`: `FocusRegistry` integration — footer key-binding bar updates dynamically when the table gains focus
+- `FocusRegistry`: new `GenServer` tracking the focused widget's key bindings; consumed by `Footer` for dynamic display
 - `EventRouter`: `{:key, key, mods}` events now dispatch to `handle_key/3` if exported, falling back to `handle_key/2`
 
 ## [0.1.14] - 2026-03-14
