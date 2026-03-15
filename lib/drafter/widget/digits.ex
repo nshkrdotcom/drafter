@@ -14,11 +14,14 @@ defmodule Drafter.Widget.Digits do
     * `:style` - map of style properties applied to all characters
     * `:align` - horizontal alignment within the available width: `:left` (default), `:center`, `:right`
     * `:size` - character size: `:large` (default, 7×5 chars) or `:small` (5×3 chars)
+    * `:bg_data` - optional list of numbers; when set, renders an area-chart fill behind the digits using per-cell bg colors (same composite as Grafana's graphMode: area stat panel)
+    * `:color` - `{r, g, b}` fill color for the area chart (default `{0, 150, 255}`); digit glyphs are rendered with an auto-contrasting fg color
 
   ## Usage
 
       digits("12:34", size: :large, style: %{fg: {0, 200, 100}})
       digits("99%", size: :small, align: :center)
+      digits("42%", bg_data: history, color: {0, 180, 120}, size: :large, align: :center)
   """
 
   @behaviour Drafter.Widget
@@ -103,7 +106,9 @@ defmodule Drafter.Widget.Digits do
       text: Map.get(props, :text, ""),
       style: Map.get(props, :style, %{}),
       align: Map.get(props, :align, :left),
-      size: Map.get(props, :size, :large)
+      size: Map.get(props, :size, :large),
+      bg_data: Map.get(props, :bg_data),
+      color: Map.get(props, :color, {0, 150, 255})
     }
   end
 
@@ -113,7 +118,10 @@ defmodule Drafter.Widget.Digits do
     if Enum.empty?(digits) do
       []
     else
-      render_digits(digits, state, rect)
+      case state.bg_data do
+        nil -> render_digits(digits, state, rect)
+        data -> render_with_bg(digits, data, state, rect)
+      end
     end
   end
 
@@ -123,6 +131,105 @@ defmodule Drafter.Widget.Digits do
 
   def handle_event(_event, state) do
     {:noreply, state}
+  end
+
+  defp render_with_bg(digits, data, state, rect) do
+    {patterns, digit_height} =
+      if state.size == :small, do: {@small_patterns, 3}, else: {@large_patterns, 5}
+
+    glyph_width = digits |> Enum.map(&(Map.get(patterns, &1, patterns[" "]) |> hd() |> String.length())) |> Enum.sum()
+
+    left_offset =
+      case state.align do
+        :center -> max(0, div(rect.width - glyph_width, 2))
+        :right -> max(0, rect.width - glyph_width)
+        _ -> 0
+      end
+
+    top_offset = div(rect.height - digit_height, 2) |> max(0)
+
+    glyph_map = build_glyph_map(digits, patterns, digit_height, left_offset, top_offset)
+
+    fill_color = state.color
+    fg_color = contrasting_fg(fill_color)
+    chart_matrix = build_chart_matrix(data, rect.width, rect.height)
+
+    Enum.map(0..(rect.height - 1), fn row ->
+      segments =
+        Enum.map(0..(rect.width - 1), fn col ->
+          in_fill = chart_matrix |> Enum.at(col, 0) > rect.height - 1 - row
+          bg = if in_fill, do: fill_color, else: nil
+          glyph_char = Map.get(glyph_map, {row, col})
+
+          {char, fg} =
+            if glyph_char && glyph_char != " " do
+              {glyph_char, fg_color}
+            else
+              {" ", nil}
+            end
+
+          style = %{}
+          style = if bg, do: Map.put(style, :bg, bg), else: style
+          style = if fg, do: Map.put(style, :fg, fg), else: style
+          Segment.new(char, style)
+        end)
+
+      Strip.new(segments)
+    end)
+  end
+
+  defp build_glyph_map(digits, patterns, _digit_height, left_offset, top_offset) do
+    digits
+    |> Enum.reduce({%{}, left_offset}, fn digit, {map, col_offset} ->
+      pattern = Map.get(patterns, digit, patterns[" "])
+      char_width = pattern |> hd() |> String.length()
+
+      row_map =
+        pattern
+        |> Enum.with_index()
+        |> Enum.reduce(map, fn {row_str, row_idx}, acc ->
+          row_str
+          |> String.graphemes()
+          |> Enum.with_index()
+          |> Enum.reduce(acc, fn {ch, c}, inner ->
+            Map.put(inner, {top_offset + row_idx, col_offset + c}, ch)
+          end)
+        end)
+
+      {row_map, col_offset + char_width}
+    end)
+    |> elem(0)
+  end
+
+  defp build_chart_matrix(data, width, height) do
+    sampled = sample_data(data, width)
+    max_val = Enum.max(sampled, fn -> 1 end)
+    min_val = Enum.min(sampled, fn -> 0 end)
+    range = max(max_val - min_val, 1)
+
+    Enum.map(sampled, fn v ->
+      round((v - min_val) / range * height)
+    end)
+  end
+
+  defp sample_data(data, width) when length(data) == width, do: data
+
+  defp sample_data(data, width) when length(data) > width do
+    len = length(data)
+    Enum.map(0..(width - 1), fn i ->
+      idx = round(i * (len - 1) / max(width - 1, 1))
+      Enum.at(data, idx)
+    end)
+  end
+
+  defp sample_data(data, width) do
+    pad = width - length(data)
+    List.duplicate(0, pad) ++ data
+  end
+
+  defp contrasting_fg({r, g, b}) do
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    if luminance > 140, do: {0, 0, 0}, else: {255, 255, 255}
   end
 
   defp render_digits(digits, state, rect) do
