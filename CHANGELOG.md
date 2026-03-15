@@ -8,7 +8,13 @@ Versions marked with ★ were published to Hex.pm.
 - `DataTable`: per-cell background colouring via `color_fn: (raw_value -> {r,g,b} | nil)` on column definitions; applied when the row is not selected
 - `DataTable`: 3-state column sort cycle — click cycles ascending → descending → unsorted (restores original data order); `↕` indicator shown on all sortable-but-unsorted columns when `sortable: true`
 - `DataTable`: table-level `sortable: false` option disables all sort indicators and click-to-sort
-- `DataTable`: column width drag-resize — click and drag a column border in the header row to resize; minimum 3 characters
+- `DataTable`: column width drag-resize — drag a column header to resize (when `locked: true`, the default); minimum 3 characters
+- `DataTable`: column reorder — `Shift+←` / `Shift+→` moves the cursor column; drag a header while `locked: false` swaps columns live
+- `DataTable`: `locked:` option — `true` (default) makes header-drag resize; `false` makes header-drag reorder
+- `DataTable`: `on_layout_change:` callback — fires with `%{col_widths: [...], col_order: [...]}` after any resize or reorder
+- `DataTable`: `col_widths:` and `col_order:` mount/update props to restore a previously saved layout
+- `DataTable`: keyboard resize (`+`/`-`) fires `on_layout_change` after each step
+- `EventRouter`: `{:key, key, mods}` events now dispatch to `handle_key/3` if exported, falling back to `handle_key/2`
 
 ## [0.1.14] - 2026-03-14
 ### Fixed

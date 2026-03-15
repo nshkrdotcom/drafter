@@ -70,6 +70,18 @@ defmodule Drafter.Widget.EventRouter do
           {:bubble, state}
         end
 
+      {:key, key, mods} ->
+        cond do
+          :keyboard in handles and function_exported?(module, :handle_key, 3) ->
+            module.handle_key(key, mods, state)
+
+          :keyboard in handles and function_exported?(module, :handle_key, 2) ->
+            module.handle_key(key, state)
+
+          true ->
+            {:bubble, state}
+        end
+
       _ ->
         if function_exported?(module, :handle_custom_event, 2) do
           module.handle_custom_event(event, state)

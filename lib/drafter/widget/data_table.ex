@@ -44,6 +44,10 @@ defmodule Drafter.Widget.DataTable do
     * `:height` - widget height in rows (default: `20`)
     * `:fixed_columns` - number of left-most columns that do not scroll horizontally (default: `0`)
     * `:sortable` - enable/disable column sorting and sort indicators for the entire table (default: `true`)
+    * `:locked` - when `true` (default), dragging a column header resizes it; when `false`, dragging reorders columns
+    * `:on_layout_change` - `(%{col_widths: [...], col_order: [...]}) -> term()` called after resize or reorder
+    * `:col_widths` - initial list of column widths in display order; used to restore a saved layout
+    * `:col_order` - initial list of original column indices in display order; used to restore a saved layout
 
   ## Key bindings
 
@@ -53,7 +57,10 @@ defmodule Drafter.Widget.DataTable do
     * `Page Up` / `Page Down` — jump by viewport height
     * `Enter` — select the highlighted row and call `:on_select`
     * `Space` — toggle selection in `:multiple` mode; otherwise same as Enter
+    * `+` / `-` — widen or narrow the cursor column
+    * `Shift+←` / `Shift+→` — reorder the cursor column left or right
     * Mouse click on header — sort by that column (cycles through ascending → descending → unsorted)
+    * Mouse drag on header — resize column (when `locked: true`) or reorder column (when `locked: false`)
     * Mouse click on row — select the row
     * Mouse scroll — move cursor row (or scroll viewport when `:mouse_scroll_moves_selection` is `false`)
     * Scrollbar click/drag — jump or drag the viewport position
@@ -115,11 +122,15 @@ defmodule Drafter.Widget.DataTable do
     :hovering_scrollbar,
     :sortable,
     :resizable,
+    :locked,
+    :on_layout_change,
     :_unsorted_data,
     :_col_widths,
+    :_col_order,
     :_resize_col,
     :_resize_start_x,
-    :_resize_start_width
+    :_resize_start_width,
+    :_reorder_col
   ]
 
   @type column :: %{
@@ -164,7 +175,9 @@ defmodule Drafter.Widget.DataTable do
           fixed_columns: non_neg_integer(),
           fixed_col_widths: [pos_integer()],
           sortable: boolean(),
-          resizable: boolean()
+          resizable: boolean(),
+          locked: boolean(),
+          on_layout_change: (%{col_widths: [pos_integer()], col_order: [non_neg_integer()]} -> term()) | nil
         }
 
   @impl Drafter.Widget
@@ -228,11 +241,15 @@ defmodule Drafter.Widget.DataTable do
       fixed_col_widths: [],
       sortable: Map.get(props, :sortable, true),
       resizable: Map.get(props, :resizable, true),
+      locked: Map.get(props, :locked, true),
+      on_layout_change: Map.get(props, :on_layout_change),
       _unsorted_data: data,
-      _col_widths: nil,
+      _col_widths: Map.get(props, :col_widths),
+      _col_order: Map.get(props, :col_order),
       _resize_col: nil,
       _resize_start_x: nil,
-      _resize_start_width: nil
+      _resize_start_width: nil,
+      _reorder_col: nil
     }
   end
 
@@ -316,8 +333,8 @@ defmodule Drafter.Widget.DataTable do
     [
       {"↑↓", "Scroll"},
       {"Enter", "Select"},
-      {"+", "Widen col"},
-      {"-", "Narrow col"}
+      {"+/-", "Resize col"},
+      {"⇧←→", "Reorder col"}
     ]
   end
 
@@ -353,6 +370,10 @@ defmodule Drafter.Widget.DataTable do
   def handle_key(:space, state), do: action_toggle_selection(state)
   def handle_key(_key, state), do: {:bubble, state}
 
+  def handle_key(:left, [:shift], state), do: reorder_column(state, state.cursor_col, :left)
+  def handle_key(:right, [:shift], state), do: reorder_column(state, state.cursor_col, :right)
+  def handle_key(_key, _mods, state), do: {:bubble, state}
+
   @impl Drafter.Widget
   def handle_scroll(direction, state) do
     if state.mouse_scroll_moves_selection do
@@ -370,8 +391,16 @@ defmodule Drafter.Widget.DataTable do
 
   @impl Drafter.Widget
   def handle_click(x, y, state) do
-    state = %{state | _resize_col: nil, _resize_start_x: nil, _resize_start_width: nil}
-    handle_mouse_click(state, x, y)
+    was_resizing = state._resize_col != nil
+    was_reordering = state._reorder_col != nil
+    state = %{state | _resize_col: nil, _resize_start_x: nil, _resize_start_width: nil, _reorder_col: nil}
+
+    if was_resizing or was_reordering do
+      trigger_layout_change(state)
+      {:ok, state}
+    else
+      handle_mouse_click(state, x, y)
+    end
   end
 
   @impl Drafter.Widget
@@ -380,11 +409,20 @@ defmodule Drafter.Widget.DataTable do
       state._resize_col != nil ->
         do_column_resize(state, x)
 
-      y == 0 and state.show_header and state.resizable ->
+      state._reorder_col != nil ->
+        do_column_reorder(state, x)
+
+      y == 0 and state.show_header and state.locked and state.resizable ->
         col = calculate_column_from_x(state, x)
         widths = get_column_widths(state, state.width)
         start_width = Enum.at(widths, col, 10)
         {:ok, %{state | _resize_col: col, _resize_start_x: x, _resize_start_width: start_width, _col_widths: widths}}
+
+      y == 0 and state.show_header and not state.locked ->
+        col = calculate_column_from_x(state, x)
+        widths = get_column_widths(state, state.width)
+        col_order = get_col_order_list(state)
+        {:ok, %{state | _reorder_col: col, _col_widths: widths, _col_order: col_order}}
 
       true ->
         handle_mouse_drag(state, x, y)
@@ -458,8 +496,20 @@ defmodule Drafter.Widget.DataTable do
         height: Map.get(props, :height, state.height),
         sortable: Map.get(props, :sortable, state.sortable),
         resizable: Map.get(props, :resizable, state.resizable),
+        locked: Map.get(props, :locked, state.locked),
+        on_layout_change: Map.get(props, :on_layout_change, state.on_layout_change),
         _unsorted_data: if(Map.has_key?(props, :data), do: new_data, else: state._unsorted_data),
-        _col_widths: if(col_count_changed, do: nil, else: state._col_widths)
+        _col_widths:
+          cond do
+            col_count_changed -> nil
+            state._col_widths == nil and Map.has_key?(props, :col_widths) -> Map.get(props, :col_widths)
+            true -> state._col_widths
+          end,
+        _col_order:
+          case {Map.fetch(props, :col_order), state._col_order} do
+            {{:ok, order}, nil} -> order
+            _ -> state._col_order
+          end
     }
   end
 
@@ -745,7 +795,7 @@ defmodule Drafter.Widget.DataTable do
     col_index = calculate_column_from_x(state, x)
 
     if col_index < length(state.columns) do
-      column = Enum.at(state.columns, col_index)
+      column = Enum.at(get_ordered_columns(state), col_index)
 
       if state.sortable && column.sortable do
         {new_direction, new_data, new_sort_col} =
@@ -803,7 +853,7 @@ defmodule Drafter.Widget.DataTable do
 
   defp render_header(state, column_widths, total_width) do
     segments =
-      state.columns
+      get_ordered_columns(state)
       |> Enum.zip(column_widths)
       |> Enum.with_index()
       |> Enum.map(fn {{column, width}, col_index} ->
@@ -852,7 +902,7 @@ defmodule Drafter.Widget.DataTable do
     is_zebra = state.zebra_stripes && rem(row_index, 2) == 1
 
     segments =
-      state.columns
+      get_ordered_columns(state)
       |> Enum.zip(column_widths)
       |> Enum.with_index()
       |> Enum.map(fn {{column, width}, _col_index} ->
@@ -1268,6 +1318,81 @@ defmodule Drafter.Widget.DataTable do
     current = Enum.at(widths, col, 10)
     new_width = max(3, current + delta)
     new_col_widths = List.replace_at(widths, col, new_width)
-    {:ok, %{state | _col_widths: new_col_widths}, [:render_update]}
+    new_state = %{state | _col_widths: new_col_widths}
+    trigger_layout_change(new_state)
+    {:ok, new_state, [:render_update]}
+  end
+
+  defp get_ordered_columns(state) do
+    case state._col_order do
+      nil -> state.columns
+      order -> Enum.map(order, &Enum.at(state.columns, &1))
+    end
+  end
+
+  defp get_col_order_list(state) do
+    count = length(state.columns)
+    state._col_order || if count > 0, do: Enum.to_list(0..(count - 1)), else: []
+  end
+
+  defp do_column_reorder(state, x) do
+    target_col = calculate_column_from_x(state, x)
+    source_col = state._reorder_col
+
+    if target_col != source_col do
+      new_col_order = swap_in_list(state._col_order, source_col, target_col)
+      new_col_widths = swap_in_list(state._col_widths, source_col, target_col)
+
+      new_state = %{state |
+        _col_order: new_col_order,
+        _col_widths: new_col_widths,
+        _reorder_col: target_col,
+        cursor_col: target_col
+      }
+
+      {:ok, new_state, [:render_update]}
+    else
+      {:ok, state}
+    end
+  end
+
+  defp reorder_column(state, display_col, :left) when display_col > 0 do
+    widths = get_column_widths(state, state.width)
+    col_order = get_col_order_list(state)
+    new_col_order = swap_in_list(col_order, display_col, display_col - 1)
+    new_col_widths = swap_in_list(widths, display_col, display_col - 1)
+    new_state = %{state | _col_order: new_col_order, _col_widths: new_col_widths, cursor_col: display_col - 1}
+    trigger_layout_change(new_state)
+    {:ok, new_state, [:render_update]}
+  end
+
+  defp reorder_column(state, _display_col, :left), do: {:ok, state}
+
+  defp reorder_column(state, display_col, :right) when display_col < length(state.columns) - 1 do
+    widths = get_column_widths(state, state.width)
+    col_order = get_col_order_list(state)
+    new_col_order = swap_in_list(col_order, display_col, display_col + 1)
+    new_col_widths = swap_in_list(widths, display_col, display_col + 1)
+    new_state = %{state | _col_order: new_col_order, _col_widths: new_col_widths, cursor_col: display_col + 1}
+    trigger_layout_change(new_state)
+    {:ok, new_state, [:render_update]}
+  end
+
+  defp reorder_column(state, _display_col, :right), do: {:ok, state}
+
+  defp swap_in_list(list, i, j) do
+    a = Enum.at(list, i)
+    b = Enum.at(list, j)
+    list
+    |> List.replace_at(i, b)
+    |> List.replace_at(j, a)
+  end
+
+  defp trigger_layout_change(state) do
+    if state.on_layout_change do
+      col_widths = get_column_widths(state, state.width)
+      col_order = get_col_order_list(state)
+      state.on_layout_change.(%{col_widths: col_widths, col_order: col_order})
+    end
   end
 end
