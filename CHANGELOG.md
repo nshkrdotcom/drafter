@@ -3,7 +3,10 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## [0.1.20] - 2026-03-16
+## [0.1.21] - 2026-03-16
+### Added
+- `ScrollableContainer`: `click_to_scroll: true` opt-in mode — scroll events are claimed by the parent container by default; `Ctrl+Click` inside the viewport toggles scroll-lock on that container (border highlights to show active state); clicking outside clears the lock. Nested scroll containers register themselves as exceptions at mount time so the per-event routing check only runs when exceptions exist (zero overhead when no nesting).
+
 ### Fixed
 - `ComponentRenderer`: auto-generated widget IDs are now namespaced by `app_module` (e.g. `ThemeSandbox_button_1` vs `InputModal_button_1`), eliminating ETS strip collisions between base-app and modal hierarchies that caused base-app widgets (e.g. the "Open Modal" button) to visually disappear when a modal was opened
 

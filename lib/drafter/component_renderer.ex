@@ -2222,7 +2222,8 @@ defmodule Drafter.ComponentRenderer do
          opts,
          app_module
        ) do
-    scroll_id = Keyword.get(opts, :id, :"scrollable_#{id_counter}")
+    scroll_id = ns_widget_id(opts, app_module, "scrollable", id_counter)
+    click_to_scroll = Keyword.get(opts, :click_to_scroll, false)
     scrollbar_width = 1
     content_rect = %{rect | width: rect.width - scrollbar_width}
 
@@ -2238,7 +2239,8 @@ defmodule Drafter.ComponentRenderer do
       viewport_height: rect.height,
       viewport_width: content_rect.width,
       show_vertical_scrollbar: Keyword.get(opts, :show_vertical_scrollbar, :auto),
-      show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never)
+      show_horizontal_scrollbar: Keyword.get(opts, :show_horizontal_scrollbar, :never),
+      click_to_scroll: click_to_scroll
     }
 
     scrollbar_rect = %{
@@ -2273,7 +2275,8 @@ defmodule Drafter.ComponentRenderer do
         scroll_id,
         content_rect,
         total_content_height,
-        content_rect.width
+        content_rect.width,
+        click_to_scroll
       )
 
     start_counter = id_counter + 1

@@ -47,7 +47,9 @@ defmodule Drafter.Widget.ScrollableContainer do
     :child_widget_ids,
     :dragging_scrollbar,
     :hovering_scrollbar,
-    :drag_thumb_offset
+    :drag_thumb_offset,
+    :click_to_scroll,
+    :scroll_locked
   ]
 
   def mount(props) do
@@ -65,7 +67,9 @@ defmodule Drafter.Widget.ScrollableContainer do
       child_widget_ids: Map.get(props, :child_widget_ids, []),
       dragging_scrollbar: false,
       hovering_scrollbar: false,
-      drag_thumb_offset: 0
+      drag_thumb_offset: 0,
+      click_to_scroll: Map.get(props, :click_to_scroll, false),
+      scroll_locked: false
     }
   end
 
@@ -98,7 +102,11 @@ defmodule Drafter.Widget.ScrollableContainer do
   end
 
   defp render_with_scrollbar(state, rect, theme) do
-    track_style = %{fg: theme.text_muted, bg: theme.surface}
+    track_style =
+      if state.click_to_scroll and state.scroll_locked,
+        do: %{fg: theme.primary, bg: theme.surface},
+        else: %{fg: theme.text_muted, bg: theme.surface}
+
     thumb_style = %{fg: theme.primary, bg: theme.primary}
     thumb_hover_style = %{fg: {255, 255, 255}, bg: {0, 150, 255}}
     thumb_drag_style = %{fg: {255, 255, 255}, bg: {0, 120, 200}}

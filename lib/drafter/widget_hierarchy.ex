@@ -23,7 +23,9 @@ defmodule Drafter.WidgetHierarchy do
   @type scroll_info :: %{
           viewport_rect: rect(),
           content_height: integer(),
-          content_width: integer()
+          content_width: integer(),
+          click_to_scroll: boolean(),
+          scroll_exceptions: MapSet.t()
         }
 
   @type t :: %__MODULE__{
@@ -786,26 +788,42 @@ defmodule Drafter.WidgetHierarchy do
         handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
 
       {:click, widget_id} ->
-        hierarchy = focus_widget(hierarchy, widget_id)
-        relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+        if :ctrl in Map.get(mouse_event, :mods, []) do
+          hierarchy =
+            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
 
-        {new_hierarchy, actions} =
-          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+          {hierarchy, []}
+        else
+          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+          hierarchy = focus_widget(hierarchy, widget_id)
+          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
 
-        widget_state = get_widget_state(new_hierarchy, widget_id)
-        new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-        {new_hierarchy, actions}
+          {new_hierarchy, actions} =
+            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+          widget_state = get_widget_state(new_hierarchy, widget_id)
+          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
+          {new_hierarchy, actions}
+        end
 
       {:press, widget_id} ->
-        hierarchy = focus_widget(hierarchy, widget_id)
-        relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
+        if :ctrl in Map.get(mouse_event, :mods, []) do
+          hierarchy =
+            toggle_scroll_lock_at(hierarchy, mouse_event.x, mouse_event.y)
 
-        {new_hierarchy, actions} =
-          handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+          {hierarchy, []}
+        else
+          hierarchy = clear_scroll_locks_outside(hierarchy, mouse_event.x, mouse_event.y)
+          hierarchy = focus_widget(hierarchy, widget_id)
+          relative_event = make_relative_mouse_event(hierarchy, widget_id, mouse_event)
 
-        widget_state = get_widget_state(new_hierarchy, widget_id)
-        new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
-        {new_hierarchy, actions}
+          {new_hierarchy, actions} =
+            handle_event_with_phases(hierarchy, widget_id, {:mouse, relative_event})
+
+          widget_state = get_widget_state(new_hierarchy, widget_id)
+          new_hierarchy = maybe_start_drag_capture(new_hierarchy, widget_id, widget_state)
+          {new_hierarchy, actions}
+        end
 
       {:mouse_up, widget_id} ->
         hierarchy = focus_widget(hierarchy, widget_id)
@@ -831,6 +849,81 @@ defmodule Drafter.WidgetHierarchy do
     end
   end
 
+  defp toggle_scroll_lock_at(hierarchy, x, y) do
+    click_to_scroll_containers =
+      Enum.filter(hierarchy.scroll_containers, fn {_id, info} ->
+        info.click_to_scroll
+      end)
+
+    innermost =
+      click_to_scroll_containers
+      |> Enum.filter(fn {_id, info} ->
+        v = info.viewport_rect
+        x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height
+      end)
+      |> Enum.min_by(fn {_id, info} ->
+        info.viewport_rect.width * info.viewport_rect.height
+      end, fn -> nil end)
+
+    case innermost do
+      nil ->
+        hierarchy
+
+      {scroll_id, _info} ->
+        case get_widget_state(hierarchy, scroll_id) do
+          nil ->
+            hierarchy
+
+          state ->
+            new_state = %{state | scroll_locked: not state.scroll_locked}
+            update_widget_state_in_hierarchy(hierarchy, scroll_id, new_state)
+        end
+    end
+  end
+
+  defp clear_scroll_locks_outside(hierarchy, x, y) do
+    Enum.reduce(hierarchy.scroll_containers, hierarchy, fn {scroll_id, info}, h ->
+      if info.click_to_scroll do
+        v = info.viewport_rect
+        outside = not (x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height)
+
+        if outside do
+          case get_widget_state(h, scroll_id) do
+            nil ->
+              h
+
+            state ->
+              if Map.get(state, :scroll_locked, false) do
+                new_state = %{state | scroll_locked: false}
+                update_widget_state_in_hierarchy(h, scroll_id, new_state)
+              else
+                h
+              end
+          end
+        else
+          h
+        end
+      else
+        h
+      end
+    end)
+  end
+
+  defp update_widget_state_in_hierarchy(hierarchy, widget_id, new_state) do
+    case Map.get(hierarchy.widgets, widget_id) do
+      nil ->
+        hierarchy
+
+      %{pid: pid} when is_pid(pid) ->
+        WidgetServer.set_state(pid, new_state)
+        hierarchy
+
+      widget_info ->
+        updated = %{widget_info | state: new_state}
+        %{hierarchy | widgets: Map.put(hierarchy.widgets, widget_id, updated)}
+    end
+  end
+
   defp maybe_start_drag_capture(hierarchy, widget_id, widget_state) do
     if widget_state &&
          (Map.get(widget_state, :dragging_scrollbar, false) ||
@@ -843,17 +936,36 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   defp find_scroll_container_at(hierarchy, x, y) do
-    hierarchy.scroll_containers
-    |> Enum.find_value(fn {scroll_id, scroll_info} ->
-      viewport = scroll_info.viewport_rect
+    candidates =
+      Enum.filter(hierarchy.scroll_containers, fn {_id, info} ->
+        v = info.viewport_rect
+        x >= v.x and x < v.x + v.width and y >= v.y and y < v.y + v.height
+      end)
 
-      if x >= viewport.x and x < viewport.x + viewport.width and
-           y >= viewport.y and y < viewport.y + viewport.height do
-        scroll_id
-      else
+    case candidates do
+      [] ->
         nil
-      end
-    end)
+
+      [{id, info}] when not info.click_to_scroll ->
+        id
+
+      _ ->
+        sorted =
+          Enum.sort_by(candidates, fn {_id, info} ->
+            info.viewport_rect.width * info.viewport_rect.height
+          end)
+
+        Enum.find_value(sorted, fn {id, info} ->
+          cond do
+            not info.click_to_scroll ->
+              id
+
+            info.click_to_scroll ->
+              state = get_widget_state(hierarchy, id)
+              if state && Map.get(state, :scroll_locked, false), do: id, else: nil
+          end
+        end)
+    end
   end
 
   defp make_relative_mouse_event(hierarchy, widget_id, mouse_event) do
@@ -1136,22 +1248,57 @@ defmodule Drafter.WidgetHierarchy do
   end
 
   @doc "Register a scroll container with its viewport info"
-  @spec register_scroll_container(t(), widget_id(), rect(), integer(), integer()) :: t()
+  @spec register_scroll_container(t(), widget_id(), rect(), integer(), integer(), boolean()) :: t()
   def register_scroll_container(
         hierarchy,
         scroll_id,
         viewport_rect,
         content_height,
-        content_width
+        content_width,
+        click_to_scroll \\ false
       ) do
     scroll_info = %{
       viewport_rect: viewport_rect,
       content_height: content_height,
-      content_width: content_width
+      content_width: content_width,
+      click_to_scroll: click_to_scroll,
+      scroll_exceptions: MapSet.new()
     }
 
-    new_scroll_containers = Map.put(hierarchy.scroll_containers, scroll_id, scroll_info)
-    %{hierarchy | scroll_containers: new_scroll_containers}
+    updated_containers = Map.put(hierarchy.scroll_containers, scroll_id, scroll_info)
+
+    updated_containers =
+      Enum.reduce(updated_containers, updated_containers, fn {existing_id, existing_info}, acc ->
+        cond do
+          existing_id == scroll_id ->
+            acc
+
+          existing_info.click_to_scroll and
+              viewport_rect_contains?(existing_info.viewport_rect, viewport_rect) ->
+            updated = Map.update!(acc, existing_id, fn info ->
+              %{info | scroll_exceptions: MapSet.put(info.scroll_exceptions, scroll_id)}
+            end)
+            updated
+
+          click_to_scroll and
+              viewport_rect_contains?(viewport_rect, existing_info.viewport_rect) ->
+            Map.update!(acc, scroll_id, fn info ->
+              %{info | scroll_exceptions: MapSet.put(info.scroll_exceptions, existing_id)}
+            end)
+
+          true ->
+            acc
+        end
+      end)
+
+    %{hierarchy | scroll_containers: updated_containers}
+  end
+
+  defp viewport_rect_contains?(outer, inner) do
+    inner.x >= outer.x and
+      inner.y >= outer.y and
+      inner.x + inner.width <= outer.x + outer.width and
+      inner.y + inner.height <= outer.y + outer.height
   end
 
   @doc "Set the scroll parent for a widget"

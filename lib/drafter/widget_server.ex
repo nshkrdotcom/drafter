@@ -48,6 +48,10 @@ defmodule Drafter.WidgetServer do
     GenServer.call(pid, {:capture_event, event})
   end
 
+  def set_state(pid, new_widget_state) do
+    GenServer.call(pid, {:set_state, new_widget_state})
+  end
+
   @impl true
   def init(opts) do
     module = Keyword.fetch!(opts, :module)
@@ -169,6 +173,14 @@ defmodule Drafter.WidgetServer do
       other ->
         {:reply, other, state}
     end
+  end
+
+  def handle_call({:set_state, new_widget_state}, _from, state) do
+    new_state = %{state | state: new_widget_state}
+    strips = apply(new_state.module, :render, [new_state.state, new_state.rect])
+    WidgetStripCache.put(new_state.id, new_state.rect, strips)
+    notify_render_needed(new_state.id)
+    {:reply, :ok, new_state}
   end
 
   def handle_call({:capture_event, event}, _from, state) do
