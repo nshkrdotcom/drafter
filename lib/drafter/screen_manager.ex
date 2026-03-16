@@ -691,7 +691,8 @@ defmodule Drafter.ScreenManager do
   defp meaningful_hierarchy_change?(old_hierarchy, new_hierarchy) do
     old_hierarchy.focused_widget != new_hierarchy.focused_widget or
       old_hierarchy.hover_widget != new_hierarchy.hover_widget or
-      map_size(old_hierarchy.widgets) != map_size(new_hierarchy.widgets)
+      map_size(old_hierarchy.widgets) != map_size(new_hierarchy.widgets) or
+      :erlang.phash2(old_hierarchy.widgets) != :erlang.phash2(new_hierarchy.widgets)
   end
 
   defp add_toast_with_stack_limit(toasts, new_toast, limit) do

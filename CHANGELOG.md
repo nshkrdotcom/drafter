@@ -24,6 +24,8 @@ Drafter.run(MyApp, scroll_optimization: false)
 ```
 
 ### Fixed
+- Modal focus isolation: base app widgets are now defocused (blurred) whenever a modal/screen is active — the button that opened the modal no longer retains focus styling or responds to keyboard events while the modal is open; focus is restored to the first focusable widget after the modal closes
+- `ScreenManager`: `meaningful_hierarchy_change?` now compares widget state hashes (`phash2`), so text input changes inside modals are correctly detected as meaningful and the updated hierarchy is persisted
 - `WidgetServer`: `event_sync` no longer calls `notify_render_needed` — the event loop renders after `event_sync` returns; calling it again was flooding the mailbox with one `{:widget_render_needed}` per scroll tick
 - `WidgetHierarchy`: `update_widget` no longer blocks on `WidgetServer.get_state/1` after casting `update_props` — `update_props` is now a true fire-and-forget cast; ETS has the authoritative strips so rendering is unaffected
 - `app_event_loop` / `shared_session_loop`: `{:widget_render_needed}` handler drains all pending notifications before doing a single `render_hierarchy`, eliminating N-fold duplicate composites when multiple widgets fire at once

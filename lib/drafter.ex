@@ -1351,35 +1351,41 @@ defmodule Drafter do
 
     background_strips = create_app_background(screen_rect, current_theme)
 
+    has_covering_screens = screens != []
+
     base_layers =
-      if app_module && app_state do
-        render_result =
-          case app_module.render(app_state) do
-            [] ->
-              app_module.render(app_state, screen_rect)
-
-            result ->
-              result
-          end
-
-        case render_result do
-          component_tree when is_tuple(component_tree) ->
-            hierarchy =
-              ComponentRenderer.render_tree(
-                component_tree,
-                screen_rect,
-                current_theme,
-                app_state,
-                existing_hierarchy
-              )
-
-            create_widget_layers_from_hierarchy(hierarchy, screen_rect)
-
-          _ ->
-            []
-        end
+      if has_covering_screens && existing_hierarchy do
+        create_widget_layers_from_hierarchy(existing_hierarchy, screen_rect)
       else
-        []
+        if app_module && app_state do
+          render_result =
+            case app_module.render(app_state) do
+              [] ->
+                app_module.render(app_state, screen_rect)
+
+              result ->
+                result
+            end
+
+          case render_result do
+            component_tree when is_tuple(component_tree) ->
+              hierarchy =
+                ComponentRenderer.render_tree(
+                  component_tree,
+                  screen_rect,
+                  current_theme,
+                  app_state,
+                  existing_hierarchy
+                )
+
+              create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+
+            _ ->
+              []
+          end
+        else
+          []
+        end
       end
 
     {screen_layers, overlay_layers} =
