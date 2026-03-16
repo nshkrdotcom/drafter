@@ -3,37 +3,12 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
-## [0.1.23] - 2026-03-16
-### Added
-- `Drafter.run/2`: `scroll_optimization: false` opt-out — disables the fast render path and debounce, reverting to a full `render_app` on every scroll tick. Default is `true` (optimisation enabled). `run_session/3` accepts the same option.
-
-```elixir
-Drafter.run(MyApp, scroll_optimization: false)
-```
-
-## [0.1.22] - 2026-03-16
-### Added
-- `Drafter.App`: `on_message/2` optional callback — receives any process message that is not a recognised drafter event (resize, keyboard/mouse input, widget signals, timers). Enables PubSub subscriptions, `send/2` from external processes, and GenServer-style messaging directly in the app process. Return updated state.
-
-```elixir
-def mount(_props) do
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "data:updates")
-  %{rows: []}
-end
-
-def on_message({:data_refreshed, uid, payload}, state) do
-  %{state | rows: payload.rows}
-end
-```
-
-Previously all unrecognised messages were silently dropped at the `_other` catch-all in both `app_event_loop` and `shared_session_loop`.
-
-## [0.1.21] - 2026-03-16
+## [0.1.20] - 2026-03-16
 ### Added
 - `Drafter.App`: `on_scroll_active/1` optional callback — fires once on the first scroll event of a gesture; return updated state (e.g. `%{state | scrolling: true}`)
 - `Drafter.App`: `on_scroll_idle/1` optional callback — fires when the 150 ms debounce settles after the last scroll event; return updated state (e.g. flush pending data, clear scrolling flag)
-
-These hooks let apps pause expensive work (data hydration, heavy renders) during scroll and resume it precisely when the gesture ends, without polling or timers.
+- `Drafter.App`: `on_message/2` optional callback — receives any process message not recognised by the drafter event loop (PubSub, `send/2`, GenServer casts, etc.); return updated state. Previously all such messages were silently dropped.
+- `Drafter.run/2` / `run_session/3`: `scroll_optimization: false` opt-out — disables the fast render/debounce path and triggers a full `render_app` on every scroll tick. Default is `true`.
 
 ```elixir
 def on_scroll_active(state), do: %{state | scrolling: true}
@@ -43,21 +18,18 @@ def on_scroll_idle(state) do
   %{state | scrolling: false, pending_data: nil}
 end
 
-def on_timer(:poll_data, %{scrolling: true} = state) do
-  case DataCache.take_if_updated(state.selected_uid, state.data_version) do
-    :unchanged -> state
-    {:updated, payload} -> %{state | pending_data: payload}
-  end
-end
+def on_message({:data_refreshed, _uid, payload}, state), do: %{state | rows: payload.rows}
+
+Drafter.run(MyApp, scroll_optimization: false)
 ```
 
-## [0.1.20] - 2026-03-16
 ### Fixed
 - `WidgetServer`: `event_sync` no longer calls `notify_render_needed` — the event loop renders after `event_sync` returns; calling it again was flooding the mailbox with one `{:widget_render_needed}` per scroll tick
-- `WidgetHierarchy`: `update_widget` no longer blocks on `WidgetServer.get_state/1` after casting `update_props` — `update_props` is now a true fire-and-forget cast; the hierarchy in-memory state is not updated, but ETS has the authoritative strips so rendering is unaffected
-- `app_event_loop` / `shared_session_loop`: `{:widget_render_needed}` handler drains all pending notifications before doing a single `render_hierarchy`, eliminating N-fold duplicate composites when multiple widgets fire at once (e.g. clock + chart on the same tick)
-- `app_event_loop` / `shared_session_loop`: `:scroll_debounce_render` handler drains all accumulated debounce messages before triggering one `render_app`, preventing update debt accumulation during slow/continuous scrolling where successive events arrived more than 150 ms apart
-- Removed `sync_widget_states/1` — no longer needed; `render_hierarchy` reads strips directly from ETS which widget GenServers keep current
+- `WidgetHierarchy`: `update_widget` no longer blocks on `WidgetServer.get_state/1` after casting `update_props` — `update_props` is now a true fire-and-forget cast; ETS has the authoritative strips so rendering is unaffected
+- `app_event_loop` / `shared_session_loop`: `{:widget_render_needed}` handler drains all pending notifications before doing a single `render_hierarchy`, eliminating N-fold duplicate composites when multiple widgets fire at once
+- `app_event_loop` / `shared_session_loop`: `:scroll_debounce_render` handler drains all accumulated debounce messages before triggering one `render_app`, preventing update debt accumulation during slow/continuous scrolling
+- `render_hierarchy` (fast scroll path): modals, popovers, and toasts are now correctly composited during scroll — previously the fast path painted only base app widgets, overwriting any open modal. Now reads screen and toast layers from stored ETS/hierarchy state with no `ComponentRenderer` re-run.
+- Removed `sync_widget_states/1` — no longer needed; `render_hierarchy` reads strips directly from ETS
 
 ## [0.1.19] - 2026-03-16
 ### Changed

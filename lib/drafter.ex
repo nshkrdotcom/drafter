@@ -1223,17 +1223,61 @@ defmodule Drafter do
   end
 
   defp render_hierarchy(hierarchy, screen_rect) do
+    screens = Drafter.ScreenManager.get_all_screens()
+    toasts = Drafter.ScreenManager.get_toasts()
     current_theme = ThemeManager.get_current_theme()
     background_strips = create_app_background(screen_rect, current_theme)
-    widget_layers = create_widget_layers_from_hierarchy(hierarchy, screen_rect)
+    alias Drafter.LayerCompositor
+    viewport = %{width: screen_rect.width, height: screen_rect.height}
+    background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
+    base_layers = create_widget_layers_from_hierarchy(hierarchy, screen_rect)
 
-    if widget_layers == [] do
-      Compositor.render_strips(background_strips, 0, 0)
+    if screens == [] and toasts == [] do
+      if base_layers == [] do
+        Compositor.render_strips(background_strips, 0, 0)
+      else
+        final_strips = LayerCompositor.composite([background_layer] ++ base_layers, viewport)
+        Compositor.render_strips(final_strips, 0, 0)
+      end
     else
-      alias Drafter.LayerCompositor
-      viewport = %{width: screen_rect.width, height: screen_rect.height}
-      background_layer = LayerCompositor.background_layer(background_strips, screen_rect)
-      final_strips = LayerCompositor.composite([background_layer] ++ widget_layers, viewport)
+      {screen_layers, overlay_layers} =
+        Enum.reduce(screens, {[], []}, fn screen, {content_acc, overlay_acc} ->
+          screen_local_rect = screen.rect
+
+          if screen_local_rect && screen.widget_hierarchy do
+            has_border = screen.type in [:modal, :popover] and Map.get(screen.options, :border, false)
+
+            content_rect =
+              if has_border do
+                %{
+                  x: screen_local_rect.x + 1,
+                  y: screen_local_rect.y + 1,
+                  width: max(1, screen_local_rect.width - 2),
+                  height: max(1, screen_local_rect.height - 2)
+                }
+              else
+                screen_local_rect
+              end
+
+            content_layers = create_widget_layers_from_hierarchy(screen.widget_hierarchy, content_rect)
+
+            new_overlay_layers =
+              if has_border do
+                [create_modal_border_layer(screen_local_rect, current_theme, screen.options) | overlay_acc]
+              else
+                overlay_acc
+              end
+
+            {content_acc ++ content_layers, new_overlay_layers}
+          else
+            {content_acc, overlay_acc}
+          end
+        end)
+
+      toast_layers = Enum.map(toasts, &create_toast_layer(&1, screen_rect, current_theme))
+
+      all_layers = [background_layer] ++ base_layers ++ screen_layers ++ overlay_layers ++ toast_layers
+      final_strips = LayerCompositor.composite(all_layers, viewport)
       Compositor.render_strips(final_strips, 0, 0)
     end
   end
