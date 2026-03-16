@@ -1,5 +1,35 @@
 Mix.install([{:drafter, path: Path.join(__DIR__, "..")}])
 
+defmodule InputModal do
+  use Drafter.Screen
+  import Drafter.App
+
+  def mount(_props), do: %{value: ""}
+
+  def render(state) do
+    vertical([
+      label("Enter a value:"),
+      text_input(on_change: :value_changed, placeholder: "Type here...", on_submit: :submit),
+      label(""),
+      horizontal([
+        button("Submit", variant: :primary, on_click: :submit),
+        button("Cancel", on_click: :cancel)
+      ], gap: 2)
+    ])
+  end
+
+  def handle_event(:value_changed, {text, _}, state), do: {:ok, %{state | value: text}}
+
+  def handle_event(:submit, _data, state) do
+    send(:tui_app_loop, {:app_event, :modal_submitted, state.value})
+    {:pop, :submitted}
+  end
+
+  def handle_event(:cancel, _data, _state), do: {:pop, :cancelled}
+  def handle_event({:key, :escape}, _data, _state), do: {:pop, :cancelled}
+  def handle_event(_event, _data, state), do: {:noreply, state}
+end
+
 defmodule ThemeSandbox do
   use Drafter.App
   import Drafter.App
@@ -11,6 +41,7 @@ defmodule ThemeSandbox do
       theme_names: theme_names,
       current_theme: "textual-dark",
       progress: 65.0,
+      modal_result: nil,
       sparkline_data: Enum.map(1..20, fn _ -> :rand.uniform(10) end),
       current_time: current_time(),
       table_data: [
@@ -102,11 +133,12 @@ defmodule ThemeSandbox do
             [
               label("Buttons:", style: %{bold: true}),
               horizontal([
-                button("Primary", variant: :primary, on_click: :primary_clicked),
+                button("Open Modal", variant: :primary, on_click: :open_modal),
                 button("Success", variant: :success, on_click: :success_clicked),
                 button("Warning", variant: :warning, on_click: :warning_clicked),
                 button("Error",   variant: :error,   on_click: :error_clicked)
               ], gap: 1),
+              label(if state.modal_result, do: "Modal submitted: #{state.modal_result}", else: "Modal result: (none)"),
               label(""),
               horizontal([
                 vertical([
@@ -216,6 +248,14 @@ defmodule ThemeSandbox do
   def handle_event(:theme_highlighted, name, state) do
     Drafter.ThemeManager.set_theme(name)
     {:ok, %{state | current_theme: name}}
+  end
+
+  def handle_event(:open_modal, _data, _state) do
+    {:show_modal, InputModal, %{}, [title: "Input Test", border: true, width: 40, height: 10]}
+  end
+
+  def handle_event(:modal_submitted, value, state) do
+    {:ok, %{state | modal_result: value}}
   end
 
   def handle_event(:food_selected,  food,  _state), do: {:show_toast, "Food: #{food}",  [variant: :info]}

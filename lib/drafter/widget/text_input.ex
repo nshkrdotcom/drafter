@@ -535,7 +535,7 @@ defmodule Drafter.Widget.TextInput do
   def update(props, state) do
     %{
       state
-      | text: Map.get(props, :text, state.text),
+      | text: normalize_text_prop(Map.get(props, :text, state.text), state.text),
         placeholder: Map.get(props, :placeholder, state.placeholder),
         focused: Map.get(props, :focused, state.focused),
         style: Map.get(props, :style, state.style),
@@ -558,6 +558,10 @@ defmodule Drafter.Widget.TextInput do
         select_on_focus: Map.get(props, :select_on_focus, state.select_on_focus)
     }
   end
+
+  defp normalize_text_prop(text, _fallback) when is_binary(text), do: text
+  defp normalize_text_prop({text, _}, _fallback) when is_binary(text), do: text
+  defp normalize_text_prop(_, fallback), do: fallback
 
   defp compile_restrict(nil), do: nil
   defp compile_restrict(%Regex{} = r), do: r
