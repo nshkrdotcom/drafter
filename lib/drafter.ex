@@ -1375,7 +1375,8 @@ defmodule Drafter do
                   screen_rect,
                   current_theme,
                   app_state,
-                  existing_hierarchy
+                  existing_hierarchy,
+                  app_module: app_module
                 )
 
               create_widget_layers_from_hierarchy(hierarchy, screen_rect)

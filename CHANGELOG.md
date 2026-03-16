@@ -4,6 +4,10 @@ All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
 ## [0.1.20] - 2026-03-16
+### Fixed
+- `ComponentRenderer`: auto-generated widget IDs are now namespaced by `app_module` (e.g. `ThemeSandbox_button_1` vs `InputModal_button_1`), eliminating ETS strip collisions between base-app and modal hierarchies that caused base-app widgets (e.g. the "Open Modal" button) to visually disappear when a modal was opened
+
+
 ### Added
 - `Drafter.App`: `on_scroll_active/1` optional callback — fires once on the first scroll event of a gesture; return updated state (e.g. `%{state | scrolling: true}`)
 - `Drafter.App`: `on_scroll_idle/1` optional callback — fires when the 150 ms debounce settles after the last scroll event; return updated state (e.g. flush pending data, clear scrolling flag)

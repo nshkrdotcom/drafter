@@ -47,6 +47,16 @@ defmodule Drafter.ComponentRenderer do
     {:app_callback, callback_name, data}
   end
 
+  defp ns_widget_id(opts, app_module, type, suffix) do
+    case Keyword.get(opts, :id) do
+      nil ->
+        mod = if app_module, do: app_module |> Module.split() |> List.last(), else: nil
+        if mod, do: String.to_atom("#{mod}_#{type}_#{suffix}"), else: String.to_atom("#{type}_#{suffix}")
+      id ->
+        id
+    end
+  end
+
   defp create_text_input_bound_callback(opts) do
     session_pid = self()
 
@@ -256,7 +266,7 @@ defmodule Drafter.ComponentRenderer do
         )
 
       {:button, text, opts} ->
-        widget_id = Keyword.get(opts, :id, :"button_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "button", id_counter)
         on_click = Keyword.get(opts, :on_click)
         button_type = Keyword.get(opts, :variant, Keyword.get(opts, :type, :default))
         custom_style = Keyword.get(opts, :style, %{})
@@ -316,7 +326,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:checkbox, label, opts} ->
-        widget_id = Keyword.get(opts, :id, :"checkbox_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "checkbox", id_counter)
         checked = Binding.get_bound_value(opts, app_state, Keyword.get(opts, :checked, false))
         custom_style = Keyword.get(opts, :style, %{})
         raw_classes = Keyword.get(opts, :class, [])
@@ -360,7 +370,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:text_input, opts} ->
-        widget_id = Keyword.get(opts, :id, :"text_input_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "text_input", id_counter)
         value = Binding.get_bound_value(opts, app_state, "")
         placeholder = Keyword.get(opts, :placeholder, "")
         on_submit = Keyword.get(opts, :on_submit)
@@ -469,7 +479,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:text_area, opts} ->
-        widget_id = Keyword.get(opts, :id, :"text_area_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "text_area", id_counter)
         value = Keyword.get(opts, :value, "")
         placeholder = Keyword.get(opts, :placeholder, "")
         on_change = Keyword.get(opts, :on_change)
@@ -567,7 +577,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:data_table, opts} ->
-        widget_id = Keyword.get(opts, :id, :"data_table_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "data_table", id_counter)
         columns = Keyword.get(opts, :columns, [])
         data = Keyword.get(opts, :data, [])
         on_select = Keyword.get(opts, :on_select)
@@ -704,7 +714,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:tree, opts} ->
-        widget_id = Keyword.get(opts, :id, :"tree_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "tree", id_counter)
         data = Keyword.get(opts, :data, [])
         on_select = Keyword.get(opts, :on_select)
         on_expand = Keyword.get(opts, :on_expand)
@@ -788,7 +798,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:progress_bar, opts} ->
-        widget_id = Keyword.get(opts, :id, :"progress_bar_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "progress_bar", id_counter)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
 
@@ -898,7 +908,7 @@ defmodule Drafter.ComponentRenderer do
         {hierarchy, id_counter}
 
       {:switch, opts} ->
-        widget_id = Keyword.get(opts, :id, :"switch_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "switch", id_counter)
         enabled_from_opts = Keyword.get(opts, :enabled)
 
         enabled =
@@ -1041,7 +1051,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:option_list, items, opts} ->
-        widget_id = Keyword.get(opts, :id, :"option_list_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "option_list", id_counter)
         on_select = Keyword.get(opts, :on_select)
         on_highlight = Keyword.get(opts, :on_highlight)
         selected = Keyword.get(opts, :selected)
@@ -1118,7 +1128,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:label, text, opts} ->
-        widget_id = Keyword.get(opts, :id, :"label_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "label", id_counter)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
 
@@ -1168,7 +1178,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:box, children, opts} ->
-        widget_id = Keyword.get(opts, :id, :"box_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "box", id_counter)
         title = Keyword.get(opts, :title)
         border = Keyword.get(opts, :border, :rounded)
         padding = Keyword.get(opts, :padding, 1)
@@ -1223,7 +1233,7 @@ defmodule Drafter.ComponentRenderer do
         {final_hierarchy, final_counter}
 
       {:card, children, opts} ->
-        widget_id = Keyword.get(opts, :id, :"card_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "card", id_counter)
         title = Keyword.get(opts, :title)
         border = Keyword.get(opts, :border, :rounded)
         custom_style = Keyword.get(opts, :style, %{})
@@ -1351,7 +1361,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:rule, opts} ->
-        widget_id = Keyword.get(opts, :id, :"rule_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "rule", id_counter)
 
         mount_props = %{
           orientation: Keyword.get(opts, :orientation, :horizontal),
@@ -1447,7 +1457,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:radio_set, options, opts} ->
-        widget_id = Keyword.get(opts, :id, :"radio_set_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "radio_set", id_counter)
         selected = Keyword.get(opts, :selected)
         raw_classes = Keyword.get(opts, :class, [])
         raw_classes = if is_list(raw_classes), do: raw_classes, else: [raw_classes]
@@ -1493,7 +1503,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:selection_list, options, opts} ->
-        widget_id = Keyword.get(opts, :id, :"selection_list_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "selection_list", id_counter)
         on_change = Keyword.get(opts, :on_change)
         on_item_toggle = Keyword.get(opts, :on_item_toggle)
         selected = Keyword.get(opts, :selected, [])
@@ -1554,7 +1564,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:collapsible, title, content, opts} ->
-        widget_id = Keyword.get(opts, :id, :"collapsible_#{:erlang.phash2(title)}")
+        widget_id = ns_widget_id(opts, app_module, "collapsible", :erlang.phash2(title))
         expanded = Keyword.get(opts, :expanded, false)
         on_toggle = Keyword.get(opts, :on_toggle)
         content_height = Keyword.get(opts, :content_height)
@@ -1639,7 +1649,7 @@ defmodule Drafter.ComponentRenderer do
         end
 
       {:tabbed_content, tabs, opts} ->
-        widget_id = Keyword.get(opts, :id, :"tabbed_content_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "tabbed_content", id_counter)
         active_tab = Keyword.get(opts, :active_tab, 0)
         title = Keyword.get(opts, :title)
         title_align = Keyword.get(opts, :title_align, :left)
@@ -1725,7 +1735,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:footer, opts} ->
-        widget_id = Keyword.get(opts, :id, :"footer_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "footer", id_counter)
         bindings = Keyword.get(opts, :bindings)
 
         mount_props = %{
@@ -1762,7 +1772,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:loading_indicator, opts} ->
-        widget_id = Keyword.get(opts, :id, :"loading_indicator_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "loading_indicator", id_counter)
 
         timestamp = System.monotonic_time(:millisecond)
 
@@ -1796,7 +1806,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:link, text, opts} ->
-        widget_id = Keyword.get(opts, :id, :"link_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "link", id_counter)
 
         mount_props = %{
           text: text,
@@ -1831,7 +1841,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:log, opts} ->
-        widget_id = Keyword.get(opts, :id, :"log_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "log", id_counter)
 
         mount_props = %{
           lines: Keyword.get(opts, :lines, []),
@@ -1868,7 +1878,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:rich_log, opts} ->
-        widget_id = Keyword.get(opts, :id, :"rich_log_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "rich_log", id_counter)
 
         mount_props = %{
           lines: Keyword.get(opts, :lines, []),
@@ -1901,7 +1911,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:pretty, data, opts} ->
-        widget_id = Keyword.get(opts, :id, :"pretty_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "pretty", id_counter)
 
         mount_props = %{
           data: data,
@@ -1932,7 +1942,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:masked_input, opts} ->
-        widget_id = Keyword.get(opts, :id, :"masked_input_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "masked_input", id_counter)
         raw_on_submit = Keyword.get(opts, :on_submit)
 
         mount_props = %{
@@ -1995,7 +2005,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:sparkline, data, opts} ->
-        widget_id = Keyword.get(opts, :id, :"sparkline_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "sparkline", id_counter)
 
         mount_props = %{
           data: data,
@@ -2039,7 +2049,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:chart, data, opts} ->
-        widget_id = Keyword.get(opts, :id, :"chart_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "chart", id_counter)
 
         mount_prop = %{
           data: data,
@@ -2098,7 +2108,7 @@ defmodule Drafter.ComponentRenderer do
         {new_hierarchy, id_counter + 1}
 
       {:directory_tree, opts} ->
-        widget_id = Keyword.get(opts, :id, :"directory_tree_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "directory_tree", id_counter)
 
         mount_props = %{
           path: Keyword.get(opts, :path, File.cwd!()),
@@ -2158,7 +2168,7 @@ defmodule Drafter.ComponentRenderer do
       {:code_view, opts} ->
         alias Drafter.Widget.CodeView
 
-        widget_id = Keyword.get(opts, :id, :"code_view_#{id_counter}")
+        widget_id = ns_widget_id(opts, app_module, "code_view", id_counter)
 
         source = Keyword.get(opts, :source, Keyword.get(opts, :content, ""))
         path = Keyword.get(opts, :path)
