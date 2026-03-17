@@ -649,8 +649,14 @@ defmodule Drafter do
 
             if has_screens do
               Drafter.EventHandler.dispatch_event_sync(event)
-              render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
-              app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+
+              if Drafter.ScreenManager.get_all_screens() == [] do
+                {_, fresh_hierarchy} = render_app(app_module, app_state, screen_rect, widget_hierarchy)
+                app_event_loop(app_module, app_state, screen_rect, timers, fresh_hierarchy)
+              else
+                render_screens_from_manager(screen_rect, app_module, app_state, widget_hierarchy)
+                app_event_loop(app_module, app_state, screen_rect, timers, widget_hierarchy)
+              end
             else
               {new_hierarchy, actions, widget_consumed} =
                 if widget_hierarchy && widget_hierarchy.focused_widget do

@@ -166,6 +166,8 @@ defmodule Drafter.Widget.Chart do
     :y_labels,
     :animated,
     :animation_speed,
+    :max_data_points,
+    :area_fill,
     :_render_timestamp,
     :_animation_offset,
     :_live_candle,
@@ -173,6 +175,8 @@ defmodule Drafter.Widget.Chart do
     :_drag_last_x,
     :_drag_last_y,
     :_y_offset,
+    :_data_tuple,
+    :_data_hash,
     dragging_scrollbar: false,
     focused: false
   ]
@@ -195,10 +199,13 @@ defmodule Drafter.Widget.Chart do
   @impl Drafter.Widget
   def mount(props) do
     data = Map.get(props, :data, [])
+    max_data_points = Map.get(props, :max_data_points)
 
     {min_val, max_val} = calculate_data_range(data, props)
 
     live_candle = init_live_candle(data)
+    data_hash = :erlang.phash2(data)
+    data_tuple = data_to_tuple(data)
 
     %__MODULE__{
       data: data,
@@ -221,6 +228,8 @@ defmodule Drafter.Widget.Chart do
       style: Map.get(props, :style, %{}),
       classes: Map.get(props, :classes, []),
       app_module: Map.get(props, :app_module),
+      max_data_points: max_data_points,
+      area_fill: Map.get(props, :area_fill, :below),
       _render_timestamp: Map.get(props, :_render_timestamp, 0),
       _animation_offset: 0,
       _live_candle: live_candle,
@@ -228,6 +237,8 @@ defmodule Drafter.Widget.Chart do
       _drag_last_x: nil,
       _drag_last_y: nil,
       _y_offset: 0,
+      _data_tuple: data_tuple,
+      _data_hash: data_hash,
       dragging_scrollbar: false
     }
   end
@@ -372,9 +383,33 @@ defmodule Drafter.Widget.Chart do
   @impl Drafter.Widget
   def update(props, state) do
     new_data = Map.get(props, :data, state.data)
-    {min_val, max_val} = calculate_data_range(new_data, props)
+    new_hash = :erlang.phash2(new_data)
+    data_changed = new_hash != state._data_hash
+
+    {min_val, max_val} =
+      if data_changed do
+        calculate_data_range(new_data, props)
+      else
+        custom_min = Map.get(props, :min_value)
+        custom_max = Map.get(props, :max_value)
+
+        if is_number(custom_min) or is_number(custom_max) do
+          calculate_data_range(new_data, props)
+        else
+          {state.min_value, state.max_value}
+        end
+      end
 
     live_candle = state._live_candle || init_live_candle(new_data)
+
+    {new_tuple, new_hash} =
+      if data_changed do
+        {data_to_tuple(new_data), new_hash}
+      else
+        {state._data_tuple, state._data_hash}
+      end
+
+    max_data_points = Map.get(props, :max_data_points, state.max_data_points)
 
     %{
       state
@@ -396,8 +431,12 @@ defmodule Drafter.Widget.Chart do
         animation_speed: Map.get(props, :animation_speed, state.animation_speed),
         style: Map.get(props, :style, state.style),
         classes: Map.get(props, :classes, state.classes),
+        max_data_points: max_data_points,
+        area_fill: Map.get(props, :area_fill) || state.area_fill,
         _render_timestamp: Map.get(props, :_render_timestamp, state._render_timestamp),
-        _live_candle: live_candle
+        _live_candle: live_candle,
+        _data_tuple: new_tuple,
+        _data_hash: new_hash
     }
   end
 
@@ -459,12 +498,13 @@ defmodule Drafter.Widget.Chart do
 
   defp render_line_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
+    data_src = state._data_tuple || data
 
     cond do
-      length(data) < 2 ->
+      tuple_size_or_length(data_src) < 2 ->
         empty_strips(height, bg)
 
-      is_list(hd(data)) ->
+      is_list(data) and is_list(hd(data)) ->
         colors =
           if state.colors != [] do
             state.colors
@@ -499,13 +539,13 @@ defmodule Drafter.Widget.Chart do
 
       true ->
         scroll_offset = state._scroll_offset || 0
-        total_points = length(data)
+        total_points = tuple_size_or_length(data_src)
         viewport_width = width * 2
 
         end_index = total_points - scroll_offset
         start_index = max(0, end_index - viewport_width)
 
-        viewport_data = Enum.slice(data, start_index, viewport_width)
+        viewport_data = tuple_slice(data_src, start_index, viewport_width)
 
         range = state.max_value - state.min_value
         pixel_height = height * 4
@@ -532,18 +572,18 @@ defmodule Drafter.Widget.Chart do
   end
 
   defp render_bar_chart(state, width, height, bg, fg) do
-    data = state.data
+    data_src = state._data_tuple || state.data
 
-    if length(data) == 0 do
+    if tuple_size_or_length(data_src) == 0 do
       empty_strips(height, bg)
     else
       range = state.max_value - state.min_value
       scroll_offset = state._scroll_offset || 0
-      total_bars = length(data)
+      total_bars = tuple_size_or_length(data_src)
 
       end_index = total_bars - scroll_offset
       start_index = max(0, end_index - width)
-      viewport_data = Enum.slice(data, start_index, width)
+      viewport_data = tuple_slice(data_src, start_index, width)
 
       bars =
         viewport_data
@@ -769,12 +809,13 @@ defmodule Drafter.Widget.Chart do
 
   defp render_area_chart(state, width, height, bg, fg, animation_offset) do
     data = state.data
+    data_src = state._data_tuple || data
 
     cond do
-      length(data) < 2 ->
+      tuple_size_or_length(data_src) < 2 ->
         empty_strips(height, bg)
 
-      is_list(hd(data)) ->
+      is_list(data) and is_list(hd(data)) ->
         colors =
           if state.colors != [],
             do: state.colors,
@@ -793,10 +834,10 @@ defmodule Drafter.Widget.Chart do
         scroll_offset = state._scroll_offset || 0
 
         viewport_width = width * 2
-        total_points = length(data)
+        total_points = tuple_size_or_length(data_src)
         end_index = total_points - scroll_offset
         start_index = max(0, end_index - viewport_width)
-        viewport_data = Enum.slice(data, start_index, viewport_width)
+        viewport_data = tuple_slice(data_src, start_index, viewport_width)
 
         normalized = normalize_data(viewport_data, state.min_value, range, pixel_height)
 
@@ -811,7 +852,13 @@ defmodule Drafter.Widget.Chart do
         pixels =
           for x <- 0..(length(shifted) - 1) do
             y = Enum.at(shifted, x)
-            for yi <- 0..y, do: {x, yi}
+            case state.area_fill do
+              :inverted ->
+                flipped = pixel_height - 1 - y
+                for yi <- flipped..(pixel_height - 1), do: {x, yi}
+              _ ->
+                for yi <- 0..y, do: {x, yi}
+            end
           end
           |> List.flatten()
 
@@ -1293,6 +1340,28 @@ defmodule Drafter.Widget.Chart do
       Strip.new([Segment.new("", %{bg: bg})])
     end
   end
+
+  defp data_to_tuple(data) when is_list(data), do: List.to_tuple(data)
+  defp data_to_tuple(data), do: data
+
+  defp tuple_slice(tuple, start, count) when is_tuple(tuple) do
+    size = tuple_size(tuple)
+    safe_start = max(0, min(start, size))
+    safe_count = min(count, size - safe_start)
+
+    if safe_count <= 0 do
+      []
+    else
+      for i <- safe_start..(safe_start + safe_count - 1) do
+        elem(tuple, i)
+      end
+    end
+  end
+
+  defp tuple_slice(list, start, count), do: Enum.slice(list, start, count)
+
+  defp tuple_size_or_length(tuple) when is_tuple(tuple), do: tuple_size(tuple)
+  defp tuple_size_or_length(list), do: length(list)
 
   defp add_axes(strips, state, rect, bg, fg) do
     y_axis_width = 5

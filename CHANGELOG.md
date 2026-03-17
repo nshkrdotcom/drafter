@@ -3,15 +3,21 @@
 All notable changes to Drafter are documented here.
 Versions marked with ★ were published to Hex.pm.
 
+## [0.1.22] - 2026-03-17
+### Added
+- `Chart`: `area_fill: :inverted` option for area charts — fills from the baseline upward (braille dots at bottom, empty space above); default behaviour (dots at top) is unchanged
+
+### Fixed
+- `Chart`: `area_fill` prop was silently overwritten to `:default` on every re-render because `ComponentRenderer` always passed a default value; now passes `nil` when unspecified so `update/2` preserves the mounted value
+
 ## [0.1.21] - 2026-03-16
 ### Added
 - `ScrollableContainer`: `click_to_scroll: true` opt-in mode — scroll events are claimed by the parent container by default; `Ctrl+Click` inside the viewport toggles scroll-lock on that container (border highlights to show active state); clicking outside clears the lock. Nested scroll containers register themselves as exceptions at mount time so the per-event routing check only runs when exceptions exist (zero overhead when no nesting).
 
 ### Fixed
+- `WidgetHierarchy`: `find_scroll_container_at` now consults `scroll_exceptions` — a non-`click_to_scroll` inner container (e.g. `DataTable`'s internal scroller) is skipped when an outer `click_to_scroll` container has it registered as an exception and is not scroll-locked; Ctrl+Click locking the outer container restores normal inner-scroll behaviour
+- `app_event_loop`: first keypress after closing a modal no longer dropped — when `dispatch_event_sync` causes all screens to pop, `render_app` is called immediately to produce a fresh, consistent `widget_hierarchy`; previously the stale hierarchy caused a spurious `phash2` mismatch that set `consumed = true` and silently swallowed the event
 - `ComponentRenderer`: auto-generated widget IDs are now namespaced by `app_module` (e.g. `ThemeSandbox_button_1` vs `InputModal_button_1`), eliminating ETS strip collisions between base-app and modal hierarchies that caused base-app widgets (e.g. the "Open Modal" button) to visually disappear when a modal was opened
-
-
-### Added
 - `Drafter.App`: `on_scroll_active/1` optional callback — fires once on the first scroll event of a gesture; return updated state (e.g. `%{state | scrolling: true}`)
 - `Drafter.App`: `on_scroll_idle/1` optional callback — fires when the 150 ms debounce settles after the last scroll event; return updated state (e.g. flush pending data, clear scrolling flag)
 - `Drafter.App`: `on_message/2` optional callback — receives any process message not recognised by the drafter event loop (PubSub, `send/2`, GenServer casts, etc.); return updated state. Previously all such messages were silently dropped.

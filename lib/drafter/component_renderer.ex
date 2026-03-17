@@ -2067,6 +2067,7 @@ defmodule Drafter.ComponentRenderer do
           y_labels: Keyword.get(opts, :y_labels, []),
           animated: Keyword.get(opts, :animated, false),
           animation_speed: Keyword.get(opts, :animation_speed, 100),
+          area_fill: Keyword.get(opts, :area_fill),
           style: Keyword.get(opts, :style),
           classes: Keyword.get(opts, :classes, []),
           app_module: app_module
@@ -2091,6 +2092,7 @@ defmodule Drafter.ComponentRenderer do
               title: Keyword.get(opts, :title),
               animated: Keyword.get(opts, :animated, false),
               animation_speed: Keyword.get(opts, :animation_speed, 100),
+              area_fill: Keyword.get(opts, :area_fill),
               _render_timestamp: Keyword.get(opts, :_render_timestamp, 0),
               app_module: app_module
             })

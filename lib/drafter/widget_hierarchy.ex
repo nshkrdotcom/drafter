@@ -958,7 +958,7 @@ defmodule Drafter.WidgetHierarchy do
         Enum.find_value(sorted, fn {id, info} ->
           cond do
             not info.click_to_scroll ->
-              id
+              if claimed_by_outer_click_to_scroll?(hierarchy, candidates, id), do: nil, else: id
 
             info.click_to_scroll ->
               state = get_widget_state(hierarchy, id)
@@ -966,6 +966,20 @@ defmodule Drafter.WidgetHierarchy do
           end
         end)
     end
+  end
+
+  defp claimed_by_outer_click_to_scroll?(hierarchy, candidates, inner_id) do
+    Enum.any?(candidates, fn {outer_id, outer_info} ->
+      outer_id != inner_id and
+        outer_info.click_to_scroll and
+        MapSet.member?(outer_info.scroll_exceptions, inner_id) and
+        not scroll_locked?(hierarchy, outer_id)
+    end)
+  end
+
+  defp scroll_locked?(hierarchy, scroll_id) do
+    state = get_widget_state(hierarchy, scroll_id)
+    state != nil and Map.get(state, :scroll_locked, false)
   end
 
   defp make_relative_mouse_event(hierarchy, widget_id, mouse_event) do
