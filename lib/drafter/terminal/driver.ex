@@ -7,6 +7,7 @@ defmodule Drafter.Terminal.Driver do
 
   defstruct [
     :shell_pid,
+    :terminal_mode,
     buffer: "",
     mouse_enabled: false,
     alt_screen: false,
@@ -16,12 +17,15 @@ defmodule Drafter.Terminal.Driver do
 
   @type state :: %__MODULE__{
           shell_pid: pid() | nil,
+          terminal_mode: terminal_mode(),
           buffer: binary(),
           mouse_enabled: boolean(),
           alt_screen: boolean(),
           raw_mode: boolean(),
           size: {pos_integer(), pos_integer()}
         }
+
+  @type terminal_mode :: :nif | {:stty, binary()} | nil
 
   @doc "Start the terminal driver"
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -71,6 +75,7 @@ defmodule Drafter.Terminal.Driver do
 
     state = %__MODULE__{
       shell_pid: nil,
+      terminal_mode: nil,
       buffer: "",
       mouse_enabled: false,
       alt_screen: false,
@@ -166,48 +171,61 @@ defmodule Drafter.Terminal.Driver do
     try do
       shell_pid = :shell.start_interactive({:noshell, :raw})
 
-      disable_flow_control()
+      case enter_terminal_mode() do
+        {:ok, terminal_mode} ->
+          setup_stdin()
+          setup_signal_handling()
+          setup_exit_handler()
 
-      setup_stdin()
-      setup_signal_handling()
-      setup_exit_handler()
+          IO.write([
+            ANSI.enter_alt_screen(),
+            ANSI.hide_cursor(),
+            ANSI.clear_screen(),
+            ANSI.enable_mouse()
+          ])
 
-      IO.write([
-        ANSI.enter_alt_screen(),
-        ANSI.hide_cursor(),
-        ANSI.clear_screen(),
-        ANSI.enable_mouse()
-      ])
+          new_state = %{
+            state
+            | shell_pid: shell_pid,
+              terminal_mode: terminal_mode,
+              raw_mode: true,
+              alt_screen: true,
+              mouse_enabled: true,
+              size: detect_terminal_size()
+          }
 
-      Drafter.Terminal.TermiosNif.set_tui_active()
+          {:ok, new_state}
 
-      new_state = %{
-        state
-        | shell_pid: shell_pid,
-          raw_mode: true,
-          alt_screen: true,
-          mouse_enabled: true,
-          size: detect_terminal_size()
-      }
-
-      {:ok, new_state}
+        {:error, reason} ->
+          maybe_stop_shell(shell_pid)
+          {:error, reason}
+      end
     rescue
       error ->
         {:error, error}
     end
   end
 
-  defp disable_flow_control do
+  defp enter_terminal_mode do
     case :os.type() do
       {:unix, _} ->
-        case Drafter.Terminal.TermiosNif.disable_flow_control() do
-          :nif_not_loaded -> System.cmd("stty", ["-ixon"], stderr_to_stdout: true)
-          _ -> :ok
+        case nif_enter_raw_mode() do
+          :ok -> {:ok, :nif}
+          _ -> enter_terminal_mode_with_stty()
         end
-        :ok
 
       _ ->
-        :ok
+        {:ok, nil}
+    end
+  end
+
+  defp enter_terminal_mode_with_stty do
+    with {saved_mode, 0} <- System.cmd("stty", ["-g"], stderr_to_stdout: true),
+         {_, 0} <- System.cmd("stty", ["raw", "-echo", "-ixon"], stderr_to_stdout: true) do
+      {:ok, {:stty, String.trim(saved_mode)}}
+    else
+      {output, _code} -> {:error, {:stty_failed, String.trim(output)}}
+      other -> {:error, {:stty_failed, other}}
     end
   end
 
@@ -239,16 +257,55 @@ defmodule Drafter.Terminal.Driver do
         Process.sleep(50)
       end
 
+      restore_terminal_mode(state.terminal_mode)
+
       if state.shell_pid do
-        try do
-          Process.exit(state.shell_pid, :normal)
-        rescue
-          _ -> :ok
-        end
+        maybe_stop_shell(state.shell_pid)
       end
     end
 
-    %{state | raw_mode: false, alt_screen: false, mouse_enabled: false, shell_pid: nil}
+    %{
+      state
+      | raw_mode: false,
+        alt_screen: false,
+        mouse_enabled: false,
+        shell_pid: nil,
+        terminal_mode: nil
+    }
+  end
+
+  defp restore_terminal_mode(nil), do: :ok
+
+  defp restore_terminal_mode(:nif) do
+    _ = nif_exit_raw_mode()
+    :ok
+  end
+
+  defp restore_terminal_mode({:stty, saved_mode}) do
+    _ = System.cmd("stty", [saved_mode], stderr_to_stdout: true)
+    :ok
+  end
+
+  defp maybe_stop_shell(nil), do: :ok
+
+  defp maybe_stop_shell(shell_pid) do
+    try do
+      Process.exit(shell_pid, :normal)
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp nif_enter_raw_mode do
+    apply(Drafter.Terminal.TermiosNif, :enter_raw_mode, [])
+  catch
+    :error, :undef -> :nif_not_loaded
+  end
+
+  defp nif_exit_raw_mode do
+    apply(Drafter.Terminal.TermiosNif, :exit_raw_mode, [])
+  catch
+    :error, :undef -> :ok
   end
 
   defp setup_stdin() do
@@ -396,16 +453,23 @@ defmodule Drafter.Terminal.Driver do
       {cols_str, 0} ->
         case System.cmd("tput", ["lines"]) do
           {lines_str, 0} ->
-            {String.trim(cols_str) |> String.to_integer(), String.trim(lines_str) |> String.to_integer()}
-          _ -> {80, 24}
+            {String.trim(cols_str) |> String.to_integer(),
+             String.trim(lines_str) |> String.to_integer()}
+
+          _ ->
+            {80, 24}
         end
-      _ -> {80, 24}
+
+      _ ->
+        {80, 24}
     end
   end
 
   defp detect_terminal_size_windows do
-    with {"" <> cols_str, 0} <- System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Width"]),
-         {"" <> lines_str, 0} <- System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Height"]),
+    with {"" <> cols_str, 0} <-
+           System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Width"]),
+         {"" <> lines_str, 0} <-
+           System.cmd("powershell", ["-Command", "$Host.UI.RawUI.WindowSize.Height"]),
          {cols, ""} <- Integer.parse(String.trim(cols_str)),
          {lines, ""} <- Integer.parse(String.trim(lines_str)) do
       {cols, lines}
