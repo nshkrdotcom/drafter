@@ -35,7 +35,8 @@ defmodule Drafter.ComponentRenderer do
     MaskedInput,
     Sparkline,
     DirectoryTree,
-    Chart
+    Chart,
+    Gauge
   }
 
   defp send_app_callback(callback_fn, data) when is_function(callback_fn) do
@@ -2048,6 +2049,42 @@ defmodule Drafter.ComponentRenderer do
 
         {new_hierarchy, id_counter + 1}
 
+      {:gauge, opts} ->
+        widget_id = ns_widget_id(opts, app_module, "gauge", id_counter)
+
+        mount_props = %{
+          value: Keyword.get(opts, :value, 0.0),
+          label: Keyword.get(opts, :label),
+          low_threshold: Keyword.get(opts, :low_threshold, 0.8),
+          high_threshold: Keyword.get(opts, :high_threshold, 0.9),
+          low_color: Keyword.get(opts, :low_color, {80, 200, 80}),
+          mid_color: Keyword.get(opts, :mid_color, {220, 140, 0}),
+          high_color: Keyword.get(opts, :high_color, {220, 60, 60}),
+          track_color: Keyword.get(opts, :track_color, {55, 55, 55})
+        }
+
+        new_hierarchy =
+          if Map.has_key?(hierarchy.widgets, widget_id) do
+            hierarchy
+            |> WidgetHierarchy.update_widget_parent(widget_id, parent_id)
+            |> WidgetHierarchy.update_widget_rect(widget_id, rect)
+            |> WidgetHierarchy.update_widget(widget_id, %{
+              value: mount_props.value,
+              label: mount_props.label
+            })
+          else
+            WidgetHierarchy.add_widget(
+              hierarchy,
+              widget_id,
+              Gauge,
+              mount_props,
+              parent_id,
+              rect
+            )
+          end
+
+        {new_hierarchy, id_counter + 1}
+
       {:chart, data, opts} ->
         widget_id = ns_widget_id(opts, app_module, "chart", id_counter)
 
@@ -2841,6 +2878,9 @@ defmodule Drafter.ComponentRenderer do
 
       {:sparkline, _data, _opts} ->
         1
+
+      {:gauge, opts} ->
+        Keyword.get(opts, :height, 7)
 
       {:radio_set, options, opts} ->
         Keyword.get(opts, :height, length(options))

@@ -165,6 +165,10 @@ defmodule Drafter.App do
     {:progress_bar, opts}
   end
 
+  def gauge(opts \\ []) do
+    {:gauge, opts}
+  end
+
   def switch(opts \\ []) do
     {:switch, opts}
   end
