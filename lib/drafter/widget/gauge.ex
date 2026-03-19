@@ -44,7 +44,6 @@ defmodule Drafter.Widget.Gauge do
 
   @arc_start -130.0
   @arc_sweep 260.0
-  @arc_steps 600
 
   defstruct [
     :value,
@@ -99,7 +98,7 @@ defmodule Drafter.Widget.Gauge do
     arc_strips =
       for row <- 0..(arc_char_rows - 1) do
         if row == value_row do
-          value_strip(state, w)
+          value_overlay_strip(braille_map, row, w, state)
         else
           row_strip(braille_map, row, w)
         end
@@ -121,29 +120,26 @@ defmodule Drafter.Widget.Gauge do
 
   defp build_arc_map(state, cx, cy, radius, thickness) do
     value_angle = @arc_start + state.value * @arc_sweep
-    inner_r = radius - thickness / 2.0
-    outer_r = radius + thickness / 2.0
-    r_samples = [0.0, 0.25, 0.5, 0.75, 1.0]
+    inner_r2 = (radius - thickness / 2.0) ** 2
+    outer_r2 = (radius + thickness / 2.0) ** 2
+    max_bx = trunc(cx + radius + thickness) + 1
+    max_by = trunc(cy + radius + thickness) + 1
 
-    Enum.reduce(0..@arc_steps, %{}, fn i, acc ->
-      angle_deg = @arc_start + i / @arc_steps * @arc_sweep
-      angle_rad = angle_deg * :math.pi() / 180.0
-      {color, filled} = dot_color(angle_deg, value_angle, state)
-
-      Enum.reduce(r_samples, acc, fn t, acc2 ->
-        r = inner_r + t * (outer_r - inner_r)
-        bx = round(cx + r * :math.sin(angle_rad))
-        by = round(cy - r * :math.cos(angle_rad))
-
-        if bx >= 0 and by >= 0 do
-          key = {div(bx, 2), div(by, 4)}
-          bit = Map.get(@braille_dots, {rem(bx, 2), rem(by, 4)}, 0)
-          Map.update(acc2, key, [{bit, color, filled}], &[{bit, color, filled} | &1])
-        else
-          acc2
-        end
-      end)
-    end)
+    for bx <- 0..max_bx,
+        by <- 0..max_by,
+        dx = bx - cx,
+        dy = by - cy,
+        dist2 = dx * dx + dy * dy,
+        dist2 >= inner_r2 and dist2 <= outer_r2,
+        angle_deg = :math.atan2(dx, -dy) * 180.0 / :math.pi(),
+        angle_deg >= @arc_start and angle_deg <= @arc_start + @arc_sweep,
+        reduce: %{} do
+      acc ->
+        {color, filled} = dot_color(angle_deg, value_angle, state)
+        key = {div(bx, 2), div(by, 4)}
+        bit = Map.get(@braille_dots, {rem(bx, 2), rem(by, 4)}, 0)
+        Map.update(acc, key, [{bit, color, filled}], &[{bit, color, filled} | &1])
+    end
   end
 
   defp dot_color(angle_deg, value_angle, state) do
@@ -186,10 +182,33 @@ defmodule Drafter.Widget.Gauge do
     {bits, color}
   end
 
-  defp value_strip(state, width) do
+  defp value_overlay_strip(braille_map, row, width, state) do
     text = format_value(state.value)
     color = value_color(state.value, state)
-    center_strip(text, width, color)
+    text_len = String.length(text)
+    text_start = div(width - text_len, 2)
+    text_chars = String.graphemes(text)
+
+    segments =
+      for col <- 0..(width - 1) do
+        text_offset = col - text_start
+
+        if text_offset >= 0 and text_offset < text_len do
+          Segment.new(Enum.at(text_chars, text_offset), %{fg: color})
+        else
+          case Map.get(braille_map, {col, row}) do
+            nil ->
+              Segment.new(" ", %{})
+
+            dots ->
+              {bits, dot_color} = merge_dots(dots)
+              char = if bits == 0, do: " ", else: <<@braille_base + bits::utf8>>
+              Segment.new(char, %{fg: dot_color})
+          end
+        end
+      end
+
+    Strip.new(segments)
   end
 
   defp center_strip(text, width, color) do

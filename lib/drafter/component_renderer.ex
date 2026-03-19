@@ -2880,7 +2880,7 @@ defmodule Drafter.ComponentRenderer do
         1
 
       {:gauge, opts} ->
-        Keyword.get(opts, :height, 7)
+        Keyword.get(opts, :height, 5)
 
       {:radio_set, options, opts} ->
         Keyword.get(opts, :height, length(options))

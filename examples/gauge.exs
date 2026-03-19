@@ -9,6 +9,9 @@ defmodule GaugeDemo do
 
   def keybindings, do: [{"q", "quit"}]
 
+  def handle_event({:key, :q}, _state), do: {:stop, :normal}
+  def handle_event(_event, state), do: {:noreply, state}
+
   def mount(_props) do
     %{
       animated_value: 0.20,
@@ -46,13 +49,12 @@ defmodule GaugeDemo do
       header("GAUGE DEMO"),
       horizontal(
         [
-          gauge(value: 0.20, label: "CPU Busy", flex: 1),
-          gauge(value: 0.30, label: "RAM Used", flex: 1),
-          gauge(value: 0.88, label: "Root FS", flex: 1),
-          gauge(value: state.animated_value, label: "Sys Load", flex: 1)
+          gauge(value: 0.27, label: "CPU Busy", flex: 1, height: 6),
+          gauge(value: 0.73, label: "RAM Used", flex: 1, height: 6),
+          gauge(value: 0.96, label: "Root FS", flex: 1, height: 6),
+          gauge(value: state.animated_value, label: "Sys Load", flex: 1, height: 6)
         ],
-        gap: 2,
-        flex: 1
+        gap: 2
       )
     ])
   end
