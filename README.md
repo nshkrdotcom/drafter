@@ -28,7 +28,7 @@ Add `drafter` to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:drafter, path: "../drafter"}
+    {:drafter, "~> 0.1"}
   ]
 end
 ```
