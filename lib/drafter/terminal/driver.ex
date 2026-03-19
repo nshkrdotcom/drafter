@@ -179,6 +179,8 @@ defmodule Drafter.Terminal.Driver do
         ANSI.enable_mouse()
       ])
 
+      Drafter.Terminal.TermiosNif.set_tui_active()
+
       new_state = %{
         state
         | shell_pid: shell_pid,
@@ -214,6 +216,7 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp cleanup_terminal(state) do
+    Drafter.Terminal.TermiosNif.set_tui_inactive()
     if state.raw_mode do
       cleanup_sequences = []
 
