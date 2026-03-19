@@ -97,7 +97,6 @@ defmodule Drafter.Examples.Calculator do
 
   defp do_handle({:key, k}, state) when k in ~w(0 1 2 3 4 5 6 7 8 9)a do
     digit = k |> Atom.to_string() |> String.to_integer()
-    activate(:"btn_#{digit}")
     do_handle({:digit, digit}, state)
   end
 
@@ -106,12 +105,10 @@ defmodule Drafter.Examples.Calculator do
 
   defp do_handle({:key, key}, state) when is_atom(key) do
     case Map.get(@key_mappings, key) do
-      {action, param, btn_id} ->
-        activate(btn_id)
+      {action, param, _btn_id} ->
         do_handle({action, param}, state)
 
-      {action, btn_id} ->
-        activate(btn_id)
+      {action, _btn_id} ->
         do_handle(action, state)
 
       nil ->
@@ -119,14 +116,9 @@ defmodule Drafter.Examples.Calculator do
     end
   end
 
-  defp do_handle({:key, :enter}, state) do
-    activate(:btn_equals)
-    do_handle(:equals, state)
-  end
+  defp do_handle({:key, :enter}, state), do: do_handle(:equals, state)
 
   defp do_handle(_event, state), do: {:noreply, state}
-
-  defp activate(id), do: send(:tui_app_loop, {:activate_widget, id})
 
   defp format(n) when is_integer(n), do: Integer.to_string(n)
   defp format(n) when trunc(n) == n, do: n |> trunc() |> Integer.to_string()

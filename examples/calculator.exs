@@ -60,6 +60,7 @@ defmodule Calculator do
   end
 
   defp row(buttons), do: horizontal(buttons, height: 3, gap: 2)
+
   defp btn(label, action, type, colspan, id),
     do: button(label, id: id, on_click: action, type: type, colspan: colspan)
 
@@ -68,28 +69,33 @@ defmodule Calculator do
 
   defp do_handle({:digit, d}, %{entering: false} = state),
     do: {:ok, %{state | value: d, entering: true}}
+
   defp do_handle({:digit, d}, state), do: {:ok, %{state | value: state.value * 10 + d}}
   defp do_handle(:point, state), do: {:ok, %{state | value: state.value * 1.0, entering: true}}
 
   defp do_handle({:op, operator}, state) do
-    result = if state.op, do: apply(Kernel, state.op, [state.left, state.value]), else: state.value
+    result =
+      if state.op, do: apply(Kernel, state.op, [state.left, state.value]), else: state.value
+
     {:ok, %{state | left: result, value: result, op: operator, entering: false}}
   end
 
   defp do_handle(:equals, state) do
-    result = if state.op, do: apply(Kernel, state.op, [state.left, state.value]), else: state.value
+    result =
+      if state.op, do: apply(Kernel, state.op, [state.left, state.value]), else: state.value
+
     {:ok, %{state | left: result, value: result, op: nil, entering: false}}
   end
 
   defp do_handle(:clear, %{entering: false} = state),
     do: {:ok, %{state | value: 0, left: 0, op: nil}}
+
   defp do_handle(:clear, state), do: {:ok, %{state | value: 0, entering: false}}
   defp do_handle(:plus_minus, state), do: {:ok, %{state | value: state.value * -1}}
   defp do_handle(:percent, state), do: {:ok, %{state | value: state.value / 100}}
 
   defp do_handle({:key, k}, state) when k in ~w(0 1 2 3 4 5 6 7 8 9)a do
     digit = k |> Atom.to_string() |> String.to_integer()
-    send(:tui_app_loop, {:activate_widget, :"btn_#{digit}"})
     do_handle({:digit, digit}, state)
   end
 
@@ -97,26 +103,24 @@ defmodule Calculator do
 
   defp do_handle({:key, key}, state) when is_atom(key) do
     case Map.get(@key_mappings, key) do
-      {action, param, btn_id} ->
-        send(:tui_app_loop, {:activate_widget, btn_id})
+      {action, param, _btn_id} ->
         do_handle({action, param}, state)
-      {action, btn_id} ->
-        send(:tui_app_loop, {:activate_widget, btn_id})
+
+      {action, _btn_id} ->
         do_handle(action, state)
+
       nil ->
         {:noreply, state}
     end
   end
 
-  defp do_handle({:key, :enter}, state) do
-    send(:tui_app_loop, {:activate_widget, :btn_equals})
-    do_handle(:equals, state)
-  end
+  defp do_handle({:key, :enter}, state), do: do_handle(:equals, state)
 
   defp do_handle(_event, state), do: {:noreply, state}
 
   defp format(n) when is_integer(n), do: Integer.to_string(n)
   defp format(n) when trunc(n) == n, do: n |> trunc() |> Integer.to_string()
+
   defp format(n) do
     :erlang.float_to_binary(n, [:compact, decimals: 10])
     |> String.trim_trailing("0")
