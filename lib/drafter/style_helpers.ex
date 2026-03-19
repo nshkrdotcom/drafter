@@ -14,8 +14,8 @@ defmodule Drafter.StyleHelpers do
   Combines default styles, CSS file (if any), and inline styles (if any).
   """
   def get_app_stylesheet(app_module) when is_atom(app_module) do
-    if function_exported?(app_module, :__css_path__, 1) or
-       function_exported?(app_module, :__inline_styles__, 1) do
+    if function_exported?(app_module, :__css_path__, 0) or
+       function_exported?(app_module, :__inline_styles__, 0) do
       StylesheetLoader.load_stylesheet(app_module)
     else
       WidgetStyles.default_stylesheet()
