@@ -234,6 +234,7 @@ defmodule Drafter.Terminal.Driver do
   end
 
   defp cleanup_terminal(state) do
+    Drafter.Terminal.TermiosNif.set_tui_inactive()
     if state.raw_mode do
       cleanup_sequences = []
 
