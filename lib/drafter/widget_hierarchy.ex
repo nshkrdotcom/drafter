@@ -219,7 +219,15 @@ defmodule Drafter.WidgetHierarchy do
       widget_info ->
         if widget_info.pid do
           WidgetServer.update_props(widget_info.pid, new_props)
-          hierarchy
+          new_state =
+            if function_exported?(widget_info.module, :update, 2) do
+              apply(widget_info.module, :update, [new_props, widget_info.state])
+            else
+              Map.merge(widget_info.state, new_props)
+            end
+          updated_widget = %{widget_info | state: new_state}
+          new_widgets = Map.put(hierarchy.widgets, widget_id, updated_widget)
+          %{hierarchy | widgets: new_widgets}
         else
           new_state =
             if function_exported?(widget_info.module, :update, 2) do
